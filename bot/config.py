@@ -18,6 +18,8 @@ class Settings:
     max_file_size_mb: int
     download_path: Path
     log_level: str
+    rate_limit_window_sec: int
+    rate_limit_max_requests: int
 
     @property
     def max_file_size_bytes(self) -> int:
@@ -43,6 +45,11 @@ def get_settings() -> Settings:
     download_path.mkdir(parents=True, exist_ok=True)
 
     log_level = os.environ.get("LOG_LEVEL", "INFO").strip() or "INFO"
+    rl_window_raw = os.environ.get("RATE_LIMIT_WINDOW_SEC", "60").strip()
+    rate_limit_window_sec = int(rl_window_raw) if rl_window_raw else 60
+
+    rl_max_raw = os.environ.get("RATE_LIMIT_MAX_REQUESTS", "3").strip()
+    rate_limit_max_requests = int(rl_max_raw) if rl_max_raw else 3
 
     return Settings(
         telegram_bot_token=token,
@@ -50,4 +57,6 @@ def get_settings() -> Settings:
         max_file_size_mb=max_file_size_mb,
         download_path=download_path,
         log_level=log_level,
+        rate_limit_window_sec=rate_limit_window_sec,
+        rate_limit_max_requests=rate_limit_max_requests,
     )

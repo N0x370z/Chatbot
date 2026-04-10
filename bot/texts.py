@@ -13,6 +13,7 @@ HELP_HTML = (
     "• /video &lt;url&gt; — video (MP4 cuando es posible)\n"
     "• /apple &lt;url&gt; — audio M4A (Apple)\n"
     "• /ayuda — esta lista\n"
+    "• /ping — prueba rápida de vida\n"
     "• /stats — uso (solo administrador)\n\n"
     "<b>Ejemplo</b>\n"
     "<code>/audio https://www.youtube.com/watch?v=…</code>"

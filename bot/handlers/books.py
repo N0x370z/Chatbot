@@ -7,10 +7,13 @@ import html
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
+from bot.deps import stats_from
 from bot.handlers import menu
 
 
 async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    stats_from(context).mark_command("libro", user.id if user else None)
     q = " ".join(context.args).strip() if context.args else ""
     if not q:
         await update.effective_message.reply_html(

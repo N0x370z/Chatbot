@@ -5,6 +5,7 @@ from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
+from bot.deps import stats_from
 from bot.texts import HELP_HTML, MENU_HINTS_HTML, WELCOME_HTML
 
 MENU_PREFIX = "menu:"
@@ -25,6 +26,8 @@ def main_menu_markup() -> InlineKeyboardMarkup:
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    stats_from(context).mark_command("start", user.id if user else None)
     await update.effective_message.reply_html(
         WELCOME_HTML,
         reply_markup=main_menu_markup(),
