@@ -2,8 +2,8 @@
 
 WELCOME_HTML = (
     "¡Hola! Soy <b>TelegramMediaBot</b>.\n\n"
-    "Elige una opción del menú o usa los comandos con una <b>URL</b>.\n"
-    "Las descargas usan <i>yt-dlp</i> y <i>FFmpeg</i> (deben estar instalados en el servidor)."
+    "Elige una opción del menú y te digo exactamente qué comando usar.\n\n"
+    "<b>Tip rápido</b>: para descargar pega una URL con /audio o /video."
 )
 
 HELP_HTML = (
@@ -14,6 +14,7 @@ HELP_HTML = (
     "• /apple &lt;url&gt; — audio M4A (Apple)\n"
     "• /ayuda — esta lista\n"
     "• /ping — prueba rápida de vida\n"
+    "• /jobs — ver estado de descargas en cola\n"
     "• /stats — uso (solo administrador)\n\n"
     "<b>Ejemplo</b>\n"
     "<code>/audio https://www.youtube.com/watch?v=…</code>"
@@ -21,23 +22,23 @@ HELP_HTML = (
 
 MENU_HINTS_HTML = {
     "books": (
-        "<b>Libros</b>\n"
+        "<b>Buscar libro</b>\n"
         "Comando: <code>/libro &lt;título o autor&gt;</code>\n"
-        "Aquí conectarás tu lógica de búsqueda y envío de archivos."
+        "Ejemplo: <code>/libro harry potter</code>"
     ),
     "audio": (
-        "<b>Audio</b>\n"
+        "<b>Descargar audio</b>\n"
         "Envía: <code>/audio &lt;url&gt;</code>\n"
-        "Se usa la mejor pista de audio disponible."
+        "Ejemplo: <code>/audio https://youtu.be/...</code>"
     ),
     "video": (
-        "<b>Video</b>\n"
+        "<b>Descargar video</b>\n"
         "Envía: <code>/video &lt;url&gt;</code>\n"
-        "Se intenta obtener MP4 vía yt-dlp + FFmpeg."
+        "Ejemplo: <code>/video https://youtu.be/...</code>"
     ),
     "apple": (
         "<b>Apple (M4A)</b>\n"
         "Envía: <code>/apple &lt;url&gt;</code>\n"
-        "Convierte a M4A cuando FFmpeg está instalado."
+        "Ideal para iPhone/iPod. Ejemplo: <code>/apple https://youtu.be/...</code>"
     ),
 }

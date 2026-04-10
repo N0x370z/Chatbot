@@ -5,6 +5,7 @@ from __future__ import annotations
 from telegram.ext import ContextTypes
 
 from bot.config import Settings
+from bot.download_queue import DownloadQueue
 from bot.state import BotStats, RateLimiter
 
 
@@ -30,3 +31,11 @@ def limiter_from(context: ContextTypes.DEFAULT_TYPE) -> RateLimiter:
         msg = "bot_data['limiter'] no está inicializado. Revisa bot/main.py."
         raise RuntimeError(msg)
     return limiter
+
+
+def queue_from(context: ContextTypes.DEFAULT_TYPE) -> DownloadQueue:
+    queue = context.application.bot_data.get("download_queue")
+    if queue is None:
+        msg = "bot_data['download_queue'] no está inicializado. Revisa bot/main.py."
+        raise RuntimeError(msg)
+    return queue

@@ -14,6 +14,7 @@ from telegram import Update
 from telegram.ext import Application, ContextTypes
 
 from bot.config import get_settings
+from bot.download_queue import DownloadQueue
 from bot.handlers import register_handlers
 from bot.state import BotStats, RateLimiter
 from bot.utils.logger import setup_logging
@@ -39,11 +40,16 @@ def main() -> None:
         .token(settings.telegram_bot_token)
         .build()
     )
+    stats = BotStats()
     application.bot_data["settings"] = settings
-    application.bot_data["stats"] = BotStats()
+    application.bot_data["stats"] = stats
     application.bot_data["limiter"] = RateLimiter(
         window_seconds=settings.rate_limit_window_sec,
         max_requests=settings.rate_limit_max_requests,
+    )
+    application.bot_data["download_queue"] = DownloadQueue(
+        settings=settings,
+        stats=stats,
     )
 
     register_handlers(application, admin_user_id=settings.admin_user_id)

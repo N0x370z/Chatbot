@@ -14,13 +14,16 @@ MENU_PREFIX = "menu:"
 def main_menu_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("Libros", callback_data=f"{MENU_PREFIX}books")],
+            [InlineKeyboardButton("Buscar libro", callback_data=f"{MENU_PREFIX}books")],
             [
-                InlineKeyboardButton("Audio", callback_data=f"{MENU_PREFIX}audio"),
-                InlineKeyboardButton("Video", callback_data=f"{MENU_PREFIX}video"),
+                InlineKeyboardButton("Descargar audio", callback_data=f"{MENU_PREFIX}audio"),
+                InlineKeyboardButton("Descargar video", callback_data=f"{MENU_PREFIX}video"),
             ],
-            [InlineKeyboardButton("Apple (M4A)", callback_data=f"{MENU_PREFIX}apple")],
-            [InlineKeyboardButton("Ayuda", callback_data=f"{MENU_PREFIX}help")],
+            [
+                InlineKeyboardButton("Apple (M4A)", callback_data=f"{MENU_PREFIX}apple"),
+                InlineKeyboardButton("Mis trabajos", callback_data=f"{MENU_PREFIX}jobs"),
+            ],
+            [InlineKeyboardButton("Ver comandos", callback_data=f"{MENU_PREFIX}help")],
         ],
     )
 
@@ -43,6 +46,17 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if action == "help":
         text, reply_markup = HELP_HTML, main_menu_markup()
+    elif action == "jobs":
+        text = (
+            "<b>Trabajos en cola</b>\n"
+            "Usa <code>/jobs</code> para ver tus descargas recientes y su estado.\n\n"
+            "Estados:\n"
+            "• queued: en cola\n"
+            "• running: procesando\n"
+            "• done: completado\n"
+            "• failed: error"
+        )
+        reply_markup = main_menu_markup()
     elif action in MENU_HINTS_HTML:
         text, reply_markup = MENU_HINTS_HTML[action], main_menu_markup()
     else:
