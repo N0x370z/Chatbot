@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import aiohttp
 from telegram.ext import ContextTypes
 
 from bot.config import Settings
@@ -39,3 +40,11 @@ def queue_from(context: ContextTypes.DEFAULT_TYPE) -> DownloadQueue:
         msg = "bot_data['download_queue'] no está inicializado. Revisa bot/main.py."
         raise RuntimeError(msg)
     return queue
+
+
+def http_session_from(context: ContextTypes.DEFAULT_TYPE) -> aiohttp.ClientSession:
+    session = context.application.bot_data.get("http_session")
+    if session is None or session.closed:
+        msg = "http_session no está disponible. Revisa post_init en bot/main.py."
+        raise RuntimeError(msg)
+    return session

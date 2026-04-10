@@ -8,7 +8,7 @@ WELCOME_HTML = (
 
 HELP_HTML = (
     "<b>Comandos</b>\n"
-    "• /libro &lt;título o autor&gt; — libros (tu backend)\n"
+    "• /libro &lt;título o autor&gt; — libros vía API (configura BOOKS_API_BASE_URL)\n"
     "• /audio &lt;url&gt; — audio\n"
     "• /video &lt;url&gt; — video (MP4 cuando es posible)\n"
     "• /apple &lt;url&gt; — audio M4A (Apple)\n"
@@ -24,6 +24,7 @@ MENU_HINTS_HTML = {
     "books": (
         "<b>Buscar libro</b>\n"
         "Comando: <code>/libro &lt;título o autor&gt;</code>\n"
+        "Requiere <code>BOOKS_API_BASE_URL</code> en <code>.env</code>.\n"
         "Ejemplo: <code>/libro harry potter</code>"
     ),
     "audio": (

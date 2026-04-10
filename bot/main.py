@@ -10,16 +10,35 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+import aiohttp
 from telegram import Update
 from telegram.ext import Application, ContextTypes
 
-from bot.config import get_settings
+from bot.config import Settings, get_settings
 from bot.download_queue import DownloadQueue
 from bot.handlers import register_handlers
 from bot.state import BotStats, RateLimiter
 from bot.utils.logger import setup_logging
 
 logger = logging.getLogger(__name__)
+
+
+async def post_init(application: Application) -> None:
+    settings: Settings = application.bot_data["settings"]
+    headers = {"User-Agent": "TelegramMediaBot/1.0"}
+    if settings.books_api_key:
+        headers["Authorization"] = f"Bearer {settings.books_api_key}"
+    timeout = aiohttp.ClientTimeout(total=settings.books_api_timeout_sec)
+    application.bot_data["http_session"] = aiohttp.ClientSession(
+        headers=headers,
+        timeout=timeout,
+    )
+
+
+async def post_shutdown(application: Application) -> None:
+    session: aiohttp.ClientSession | None = application.bot_data.get("http_session")
+    if session is not None and not session.closed:
+        await session.close()
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -38,6 +57,8 @@ def main() -> None:
     application = (
         Application.builder()
         .token(settings.telegram_bot_token)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
         .build()
     )
     stats = BotStats()
