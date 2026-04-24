@@ -12,6 +12,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from bot.deps import http_session_from, limiter_from, settings_from, stats_from
 from bot.handlers import menu
 from bot.services.books_api import BookResult, BooksApiError, download_book_bytes, search_books
+from bot.services.open_library import search_open_library
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +40,6 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     settings = settings_from(context)
-    if not settings.books_api_enabled:
-        await msg.reply_html(
-            "Los libros requieren una API propia.\n\n"
-            "Configura <code>BOOKS_API_BASE_URL</code> en <code>.env</code> "
-            "(revisa <code>.env.example</code> y el docstring de "
-            "<code>bot/services/books_api.py</code>).",
-            reply_markup=menu.main_menu_markup(),
-        )
-        return
-
     user_id = user.id if user else None
     if user_id is None:
         return
@@ -61,7 +52,12 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     session = http_session_from(context)
     try:
-        results: list[BookResult] = await search_books(session, settings, q)
+        if settings.books_api_enabled:
+            results: list[BookResult] = await search_books(session, settings, q)
+            context.user_data["books_source"] = "api"
+        else:
+            results = await search_open_library(session, q, settings.books_api_max_results)
+            context.user_data["books_source"] = "open_library"
     except BooksApiError as e:
         logger.info("libro búsqueda: %s", e)
         await msg.reply_text(str(e))
@@ -119,6 +115,13 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     settings = settings_from(context)
     stats = stats_from(context)
     session = http_session_from(context)
+    source = context.user_data.get("books_source", "api")
+
+    if source == "open_library":
+        await query.message.reply_text(f"Busca este libro en: https://openlibrary.org{book_id}")
+        context.user_data.pop("books_pending", None)
+        context.user_data.pop("books_source", None)
+        return
 
     try:
         await query.edit_message_text("Descargando libro…")
@@ -146,6 +149,7 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text("Error al enviar el archivo.")
     finally:
         context.user_data.pop("books_pending", None)
+        context.user_data.pop("books_source", None)
 
 
 def register(application: Application) -> None:
