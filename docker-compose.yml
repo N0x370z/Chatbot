@@ -1,0 +1,24 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python main.py
+    env_file:
+      - .env
+    volumes:
+      - ./downloads:/app/downloads
+      - /data/incoming:/data/incoming
+      - /data/processed:/data/processed
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python main_worker.py
+    env_file:
+      - .env
+    volumes:
+      - ./downloads:/app/downloads
+      - /data/incoming:/data/incoming
+      - /data/processed:/data/processed
