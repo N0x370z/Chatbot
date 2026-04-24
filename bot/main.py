@@ -50,15 +50,19 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def on_any_update(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = getattr(update, "effective_user", None)
-    chat = getattr(update, "effective_chat", None)
-    message = getattr(update, "effective_message", None)
-    logger.info(
-        "Update recibido: user_id=%s chat_id=%s text=%s",
-        user.id if user else None,
-        chat.id if chat else None,
-        message.text if message else None,
-    )
+    try:
+        user = getattr(update, "effective_user", None)
+        chat = getattr(update, "effective_chat", None)
+        message = getattr(update, "effective_message", None)
+        logger.info(
+            "Update recibido: user_id=%s chat_id=%s text=%s",
+            user.id if user else None,
+            chat.id if chat else None,
+            message.text if message else None,
+        )
+    except Exception:
+        logger.exception("Error inesperado en on_any_update")
+        raise
 
 
 def main() -> None:
