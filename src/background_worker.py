@@ -11,7 +11,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 
 from bot.utils.logger import setup_logging
 
@@ -37,6 +37,22 @@ def _safe_destination(processed_dir: Path, source_name: str) -> Path:
         if not candidate.exists():
             return candidate
     raise RuntimeError("No se pudo generar un nombre único para el archivo.")
+
+
+def _ensure_writable_dir(path_value: str, fallback_value: str) -> Path:
+    candidate = Path(path_value).expanduser().resolve()
+    try:
+        candidate.mkdir(parents=True, exist_ok=True)
+        return candidate
+    except OSError:
+        fallback = Path(fallback_value).expanduser().resolve()
+        fallback.mkdir(parents=True, exist_ok=True)
+        LOGGER.warning(
+            "Ruta no escribible (%s). Usando fallback local: %s",
+            candidate,
+            fallback,
+        )
+        return fallback
 
 
 def process_file(file_path: Path, processed_dir: Path) -> None:
@@ -82,19 +98,18 @@ def main() -> None:
     log_level = os.environ.get("LOG_LEVEL", "INFO").strip() or "INFO"
     setup_logging(log_level)
 
-    incoming_dir = Path(
-        os.environ.get("INCOMING_FILES_PATH", "/data/incoming").strip() or "/data/incoming"
-    ).resolve()
-    processed_dir = Path(
-        os.environ.get("PROCESSED_FILES_PATH", "/data/processed").strip() or "/data/processed"
-    ).resolve()
+    incoming_dir = _ensure_writable_dir(
+        os.environ.get("INCOMING_FILES_PATH", "/data/incoming").strip() or "/data/incoming",
+        "./data/incoming",
+    )
+    processed_dir = _ensure_writable_dir(
+        os.environ.get("PROCESSED_FILES_PATH", "/data/processed").strip() or "/data/processed",
+        "./data/processed",
+    )
     poll_interval = float(os.environ.get("WORKER_POLL_INTERVAL_SEC", "1.0").strip() or "1.0")
 
-    incoming_dir.mkdir(parents=True, exist_ok=True)
-    processed_dir.mkdir(parents=True, exist_ok=True)
-
     LOGGER.info("Worker iniciado. incoming=%s processed=%s", incoming_dir, processed_dir)
-    observer = Observer()
+    observer = PollingObserver(timeout=max(0.2, poll_interval))
     observer.schedule(IncomingFileHandler(processed_dir), str(incoming_dir), recursive=False)
     observer.start()
 
