@@ -10,6 +10,7 @@ from telegram import Document, Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 from bot.deps import settings_from, stats_from
+from bot.services.calibre import CalibreError, add_to_calibre
 
 logger = logging.getLogger(__name__)
 ALLOWED_EXTENSIONS = {".pdf", ".epub"}
@@ -67,6 +68,18 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         document.file_size,
         target,
     )
+    if settings.calibre_library_path is not None:
+        try:
+            out = await add_to_calibre(target, settings.calibre_library_path)
+            logger.info(
+                "Archivo agregado a Calibre: file=%s library=%s out=%s",
+                target,
+                settings.calibre_library_path,
+                out,
+            )
+        except CalibreError as e:
+            logger.warning("Calibre rechazó archivo %s: %s", target, e)
+            await message.reply_text("No se pudo agregar el archivo a Calibre.")
 
 
 def register(application: Application) -> None:

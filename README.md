@@ -14,6 +14,7 @@
 - [Instalación](#instalación)
 - [Configuración](#configuración)
 - [Uso del Bot](#uso-del-bot)
+- [Docker Compose](#docker-compose)
 - [Comandos Disponibles](#comandos-disponibles)
 - [Contribuir al Repositorio](#contribuir-al-repositorio)
 - [Roadmap](#roadmap)
@@ -92,6 +93,7 @@ TelegramMediaBot/
 │   └── worker.env.example    # Variables de entorno del worker
 ├── .gitignore
 ├── requirements.txt
+├── docker-compose.yml        # Orquestación bot + worker
 ├── Dockerfile                # (opcional) Para despliegue en contenedor
 └── README.md
 ```
@@ -163,6 +165,7 @@ WORKER_POLL_INTERVAL_SEC=1.0
 | `DOWNLOAD_PATH` | Ruta temporal de descargas | `./downloads` |
 | `INCOMING_FILES_PATH` | Carpeta de archivos entrantes | `/data/incoming` |
 | `PROCESSED_FILES_PATH` | Carpeta de archivos procesados | `/data/processed` |
+| `CALIBRE_LIBRARY_PATH` | Ruta de biblioteca de Calibre (opcional) | vacío |
 | `WORKER_POLL_INTERVAL_SEC` | Intervalo del loop principal del worker | `1.0` |
 | `LOG_LEVEL` | Nivel de logging (`INFO`, `DEBUG`) | `INFO` |
 
@@ -190,6 +193,31 @@ O con Docker:
 docker build -t telegram-media-bot .
 docker run --env-file .env telegram-media-bot
 ```
+
+---
+
+## 🐳 Docker Compose
+
+Para levantar bot y worker juntos:
+
+```bash
+docker compose up --build
+```
+
+El archivo `docker-compose.yml` define dos servicios:
+
+- `bot`: ejecuta `python main.py`
+- `worker`: ejecuta `python main_worker.py`
+
+Con volúmenes compartidos:
+
+- `./downloads:/app/downloads`
+- `/data/incoming:/data/incoming`
+- `/data/processed:/data/processed`
+
+Y toma variables desde `.env`.
+
+> En macOS, si no puedes escribir en `/data`, usa rutas locales (`./data/incoming` y `./data/processed`) en tu `.env`.
 
 ---
 

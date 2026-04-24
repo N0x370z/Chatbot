@@ -12,15 +12,51 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from bot.deps import http_session_from, limiter_from, settings_from, stats_from
 from bot.handlers import menu
 from bot.services.books_api import BookResult, BooksApiError, download_book_bytes, search_books
+from bot.services.gutenberg import download_gutenberg, search_gutenberg
+from bot.services.libgen import download_libgen, search_libgen
+from bot.services.open_library import search_open_library
 
 logger = logging.getLogger(__name__)
 
 BOOK_PREFIX = "book:"
+BOOK_SOURCES = ("gutenberg", "libgen", "open_library")
+SOURCE_LABELS = {
+    "gutenberg": "Gutenberg",
+    "libgen": "Libgen",
+    "open_library": "Open Library",
+}
 
 
 def _button_label(title: str, *, max_len: int = 58) -> str:
     t = title.strip() or "Sin título"
     return t if len(t) <= max_len else f"{t[: max_len - 3]}..."
+
+
+async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    stats = stats_from(context)
+    stats.mark_command("fuente", user.id if user else None)
+
+    msg = update.effective_message
+    args = context.args or []
+    if not args:
+        current = context.user_data.get("book_source", "open_library")
+        label = SOURCE_LABELS.get(current, current)
+        await msg.reply_text(
+            "Selecciona la fuente de libros con /fuente <opción>. Opciones: gutenberg, libgen, open_library.\n"
+            f"Fuente actual: {label}"
+        )
+        return
+
+    choice = args[0].strip().lower()
+    if choice not in BOOK_SOURCES:
+        await msg.reply_text(
+            "Fuente no válida. Usa /fuente gutenberg, /fuente libgen o /fuente open_library."
+        )
+        return
+
+    context.user_data["book_source"] = choice
+    await msg.reply_text(f"Fuente guardada: {SOURCE_LABELS[choice]}")
 
 
 async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -39,16 +75,6 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     settings = settings_from(context)
-    if not settings.books_api_enabled:
-        await msg.reply_html(
-            "Los libros requieren una API propia.\n\n"
-            "Configura <code>BOOKS_API_BASE_URL</code> en <code>.env</code> "
-            "(revisa <code>.env.example</code> y el docstring de "
-            "<code>bot/services/books_api.py</code>).",
-            reply_markup=menu.main_menu_markup(),
-        )
-        return
-
     user_id = user.id if user else None
     if user_id is None:
         return
@@ -60,8 +86,23 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     session = http_session_from(context)
+    book_source = context.user_data.get("book_source")
+    if book_source not in BOOK_SOURCES:
+        if settings.books_api_enabled:
+            book_source = "api"
+        else:
+            book_source = "open_library"
+
     try:
-        results: list[BookResult] = await search_books(session, settings, q)
+        if book_source == "gutenberg":
+            results = await search_gutenberg(session, q, settings.books_api_max_results)
+        elif book_source == "libgen":
+            results = await search_libgen(q, settings.books_api_max_results)
+        elif book_source == "open_library":
+            results = await search_open_library(session, q, settings.books_api_max_results)
+        else:
+            results = await search_books(session, settings, q)
+            book_source = "api"
     except BooksApiError as e:
         logger.info("libro búsqueda: %s", e)
         await msg.reply_text(str(e))
@@ -72,7 +113,7 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     context.user_data["books_pending"] = [
-        {"id": r.id, "title": r.title} for r in results
+        {"id": r.id, "title": r.title, "source": book_source} for r in results
     ]
     keyboard = [
         [
@@ -119,6 +160,12 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     settings = settings_from(context)
     stats = stats_from(context)
     session = http_session_from(context)
+    source = str(item.get("source", context.user_data.get("books_source", "api")))
+
+    if source == "open_library":
+        await query.message.reply_text(f"Busca este libro en: https://openlibrary.org{book_id}")
+        context.user_data.pop("books_pending", None)
+        return
 
     try:
         await query.edit_message_text("Descargando libro…")
@@ -126,7 +173,13 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text("Descargando libro…")
 
     try:
-        data, filename = await download_book_bytes(session, settings, book_id)
+        if source == "gutenberg":
+            data, filename = await download_gutenberg(session, book_id, settings)
+        elif source == "libgen":
+            data, filename = await download_libgen(session, book_id, settings)
+        else:
+            data, filename = await download_book_bytes(session, settings, book_id)
+
         buf = io.BytesIO(data)
         buf.seek(0)
         await query.message.reply_document(
@@ -150,4 +203,5 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_book_pick, pattern=r"^book:\d+$"))
+    application.add_handler(CommandHandler("fuente", cmd_fuente))
     application.add_handler(CommandHandler("libro", cmd_libro))

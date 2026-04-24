@@ -11,6 +11,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _ensure_writable_dir(path_value: str, fallback_value: str) -> Path:
+    candidate = Path(path_value).expanduser().resolve()
+    try:
+        candidate.mkdir(parents=True, exist_ok=True)
+        return candidate
+    except OSError:
+        fallback = Path(fallback_value).expanduser().resolve()
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
 @dataclass(frozen=True)
 class Settings:
     telegram_bot_token: str
@@ -29,6 +40,7 @@ class Settings:
     books_api_max_results: int
     incoming_files_path: Path
     max_upload_size_mb: int
+    calibre_library_path: Path | None
 
     @property
     def max_file_size_bytes(self) -> int:
@@ -58,8 +70,7 @@ def get_settings() -> Settings:
     max_file_size_mb = int(max_mb_raw) if max_mb_raw else 50
 
     download_str = os.environ.get("DOWNLOAD_PATH", "./downloads").strip() or "./downloads"
-    download_path = Path(download_str).resolve()
-    download_path.mkdir(parents=True, exist_ok=True)
+    download_path = _ensure_writable_dir(download_str, "./downloads")
 
     log_level = os.environ.get("LOG_LEVEL", "INFO").strip() or "INFO"
     rl_window_raw = os.environ.get("RATE_LIMIT_WINDOW_SEC", "60").strip()
@@ -90,11 +101,16 @@ def get_settings() -> Settings:
         os.environ.get("INCOMING_FILES_PATH", "/data/incoming").strip()
         or "/data/incoming"
     )
-    incoming_files_path = Path(incoming_str).resolve()
-    incoming_files_path.mkdir(parents=True, exist_ok=True)
+    incoming_files_path = _ensure_writable_dir(incoming_str, "./data/incoming")
 
     upload_max_raw = os.environ.get("MAX_UPLOAD_SIZE_MB", "50").strip()
     max_upload_size_mb = int(upload_max_raw) if upload_max_raw else 50
+    calibre_str = os.environ.get("CALIBRE_LIBRARY_PATH", "").strip()
+    calibre_library_path = None
+    if calibre_str:
+        maybe_path = Path(calibre_str).expanduser().resolve()
+        if maybe_path.exists():
+            calibre_library_path = maybe_path
 
     if books_api_base_url and not books_api_base_url.startswith(("http://", "https://")):
         msg = "BOOKS_API_BASE_URL debe empezar por http:// o https://"
@@ -117,4 +133,5 @@ def get_settings() -> Settings:
         books_api_max_results=books_api_max_results,
         incoming_files_path=incoming_files_path,
         max_upload_size_mb=max_upload_size_mb,
+        calibre_library_path=calibre_library_path,
     )
