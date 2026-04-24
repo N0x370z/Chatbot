@@ -25,6 +25,8 @@ def test_get_settings_loads(tmp_path: Path) -> None:
         "MAX_FILE_SIZE_MB": "25",
         "DOWNLOAD_PATH": str(dl),
         "LOG_LEVEL": "DEBUG",
+        "RATE_LIMIT_WINDOW_SEC": "90",
+        "RATE_LIMIT_MAX_REQUESTS": "5",
     }
     with patch.dict(os.environ, env, clear=True):
         s = get_settings()
@@ -34,4 +36,9 @@ def test_get_settings_loads(tmp_path: Path) -> None:
     assert s.max_file_size_mb == 25
     assert s.max_file_size_bytes == 25 * 1024 * 1024
     assert s.log_level == "DEBUG"
+    assert s.rate_limit_window_sec == 90
+    assert s.rate_limit_max_requests == 5
+    assert s.books_api_base_url == ""
+    assert s.books_api_enabled is False
+    assert s.books_api_max_results == 8
     assert dl.exists()

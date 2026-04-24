@@ -31,6 +31,7 @@
 - 🎧 Podcasts y audiolibros en formato AAC / M4B (Apple)
 
 El bot descarga el contenido solicitado, lo convierte si es necesario al formato requerido y lo envía directamente al chat del usuario en Telegram.
+Además, incluye un worker en segundo plano que monitoriza la carpeta de entrada y procesa archivos PDF/EPUB.
 
 ---
 
@@ -58,6 +59,7 @@ El bot descarga el contenido solicitado, lo convierte si es necesario al formato
 | [Calibre CLI](https://calibre-ebook.com/) | Conversión de formatos de libros |
 | [aiohttp](https://docs.aiohttp.org/) | Peticiones HTTP asíncronas |
 | dotenv | Manejo de variables de entorno |
+| [watchdog](https://github.com/gorakhargosh/watchdog) | Monitorización de carpetas en tiempo real |
 
 ---
 
@@ -82,6 +84,12 @@ TelegramMediaBot/
 ├── tests/
 │   └── test_handlers.py
 ├── .env.example              # Plantilla de variables de entorno
+├── main.py                   # Entrypoint del bot
+├── main_worker.py            # Entrypoint del worker
+├── src/
+│   └── background_worker.py  # Worker para /data/incoming -> /data/processed
+├── config/
+│   └── worker.env.example    # Variables de entorno del worker
 ├── .gitignore
 ├── requirements.txt
 ├── Dockerfile                # (opcional) Para despliegue en contenedor
@@ -138,6 +146,9 @@ TELEGRAM_BOT_TOKEN=tu_token_aqui
 ADMIN_USER_ID=tu_id_de_telegram
 MAX_FILE_SIZE_MB=50
 DOWNLOAD_PATH=./downloads
+INCOMING_FILES_PATH=/data/incoming
+PROCESSED_FILES_PATH=/data/processed
+WORKER_POLL_INTERVAL_SEC=1.0
 ```
 
 ---
@@ -150,6 +161,9 @@ DOWNLOAD_PATH=./downloads
 | `ADMIN_USER_ID` | ID de Telegram del administrador | — |
 | `MAX_FILE_SIZE_MB` | Tamaño máximo de archivo en MB | `50` |
 | `DOWNLOAD_PATH` | Ruta temporal de descargas | `./downloads` |
+| `INCOMING_FILES_PATH` | Carpeta de archivos entrantes | `/data/incoming` |
+| `PROCESSED_FILES_PATH` | Carpeta de archivos procesados | `/data/processed` |
+| `WORKER_POLL_INTERVAL_SEC` | Intervalo del loop principal del worker | `1.0` |
 | `LOG_LEVEL` | Nivel de logging (`INFO`, `DEBUG`) | `INFO` |
 
 > ⚠️ Nunca subas tu archivo `.env` al repositorio. Está incluido en `.gitignore`.
@@ -161,7 +175,13 @@ DOWNLOAD_PATH=./downloads
 Una vez configurado, ejecuta el bot con:
 
 ```bash
-python bot/main.py
+python main.py
+```
+
+En otra terminal, ejecuta el worker en segundo plano:
+
+```bash
+python main_worker.py
 ```
 
 O con Docker:
