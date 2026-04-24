@@ -12,7 +12,7 @@ if str(_ROOT) not in sys.path:
 
 import aiohttp
 from telegram import Update
-from telegram.ext import Application, ContextTypes
+from telegram.ext import Application, ContextTypes, TypeHandler
 
 from bot.config import Settings, get_settings
 from bot.download_queue import DownloadQueue
@@ -49,6 +49,18 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+async def on_any_update(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = getattr(update, "effective_user", None)
+    chat = getattr(update, "effective_chat", None)
+    message = getattr(update, "effective_message", None)
+    logger.info(
+        "Update recibido: user_id=%s chat_id=%s text=%s",
+        user.id if user else None,
+        chat.id if chat else None,
+        message.text if message else None,
+    )
+
+
 def main() -> None:
 
     settings = get_settings()
@@ -74,6 +86,7 @@ def main() -> None:
     )
 
     register_handlers(application, admin_user_id=settings.admin_user_id)
+    application.add_handler(TypeHandler(object, on_any_update), group=-1)
     application.add_error_handler(error_handler)
 
     logger.info("Iniciando bot en modo polling…")

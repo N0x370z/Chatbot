@@ -15,6 +15,7 @@ HELP_HTML = (
     "• /ayuda — esta lista\n"
     "• /ping — prueba rápida de vida\n"
     "• /jobs — ver estado de descargas en cola\n"
+    "• Enviar PDF/EPUB — guarda el archivo en almacenamiento local\n"
     "• /stats — uso (solo administrador)\n\n"
     "<b>Ejemplo</b>\n"
     "<code>/audio https://www.youtube.com/watch?v=…</code>"

@@ -27,6 +27,8 @@ class Settings:
     books_api_query_param: str
     books_api_timeout_sec: int
     books_api_max_results: int
+    incoming_files_path: Path
+    max_upload_size_mb: int
 
     @property
     def max_file_size_bytes(self) -> int:
@@ -35,6 +37,10 @@ class Settings:
     @property
     def books_api_enabled(self) -> bool:
         return bool(self.books_api_base_url.strip())
+
+    @property
+    def max_upload_size_bytes(self) -> int:
+        return self.max_upload_size_mb * 1024 * 1024
 
 
 def get_settings() -> Settings:
@@ -80,6 +86,16 @@ def get_settings() -> Settings:
     books_api_max_results = int(b_max_raw) if b_max_raw else 8
     books_api_max_results = max(1, min(books_api_max_results, 10))
 
+    incoming_str = (
+        os.environ.get("INCOMING_FILES_PATH", "/data/incoming").strip()
+        or "/data/incoming"
+    )
+    incoming_files_path = Path(incoming_str).resolve()
+    incoming_files_path.mkdir(parents=True, exist_ok=True)
+
+    upload_max_raw = os.environ.get("MAX_UPLOAD_SIZE_MB", "50").strip()
+    max_upload_size_mb = int(upload_max_raw) if upload_max_raw else 50
+
     if books_api_base_url and not books_api_base_url.startswith(("http://", "https://")):
         msg = "BOOKS_API_BASE_URL debe empezar por http:// o https://"
         raise ValueError(msg)
@@ -99,4 +115,6 @@ def get_settings() -> Settings:
         books_api_query_param=books_api_query_param,
         books_api_timeout_sec=books_api_timeout_sec,
         books_api_max_results=books_api_max_results,
+        incoming_files_path=incoming_files_path,
+        max_upload_size_mb=max_upload_size_mb,
     )
