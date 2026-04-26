@@ -61,6 +61,7 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     tg_file = await document.get_file()
     await tg_file.download_to_drive(custom_path=str(target))
     await message.reply_text(f"Archivo recibido y guardado: {target}")
+    context.user_data["last_uploaded_file"] = str(target)
     logger.info(
         "Archivo guardado: user_id=%s name=%s size=%s path=%s",
         user.id if user else "unknown",

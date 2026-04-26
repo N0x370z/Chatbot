@@ -227,9 +227,14 @@ Y toma variables desde `.env`.
 |---|---|
 | `/start` | Inicia el bot y muestra el menú principal |
 | `/libro <título o autor>` | Busca y envía un libro |
+| `/fuente` | Elegir fuente de libros (Gutenberg/Libgen/Open Library) |
+| `/convertir <formato>` | Convertir libro a otro formato |
 | `/audio <nombre o URL>` | Descarga y envía audio (MP3/M4A) |
+| `/formato_audio` | Elegir formato de audio (MP3/M4A/OPUS/FLAC) |
 | `/video <nombre o URL>` | Descarga y envía video (MP4) |
 | `/apple <nombre o URL>` | Descarga en formato compatible con iPod/Apple (M4A/AAC/M4B) |
+| `/jobs` | Ver estado de descargas en cola |
+| `/ping` | Prueba de conexión |
 | `/ayuda` | Muestra la lista de comandos |
 | `/stats` | (Solo admin) Estadísticas de uso |
 
@@ -346,13 +351,13 @@ git commit -m "fix: eliminar archivo sensible del repositorio"
 ## 🗺 Roadmap
 
 - [x] Estructura base del proyecto
-- [ ] Handler de descarga de libros (PDF/EPUB)
-- [ ] Handler de audio MP3 y M4A
-- [ ] Handler de video MP4
-- [ ] Soporte para formatos Apple (M4A, AAC, M4B)
-- [ ] Sistema de colas para múltiples usuarios
-- [ ] Panel de administración con estadísticas
-- [ ] Dockerización del bot
+- [x] Handler de descarga de libros (PDF/EPUB)
+- [x] Handler de audio MP3 y M4A
+- [x] Handler de video MP4
+- [x] Soporte para formatos Apple (M4A, AAC, M4B)
+- [x] Sistema de colas para múltiples usuarios
+- [x] Panel de administración con estadísticas
+- [x] Dockerización del bot
 - [ ] Despliegue en servidor VPS / Railway / Fly.io
 
 ---

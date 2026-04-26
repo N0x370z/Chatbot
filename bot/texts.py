@@ -10,7 +10,8 @@ WELCOME_HTML = (
 HELP_HTML = (
     "<b>📚 Libros</b>\n"
     "• /libro &lt;título o autor&gt; — buscar y descargar libro\n"
-    "• /fuente — elegir fuente (Open Library / Gutenberg / Libgen)\n\n"
+    "• /fuente — elegir fuente (Open Library / Gutenberg / Libgen)\n"
+    "• /convertir &lt;formato&gt; — convertir libro subido (epub/pdf/mobi)\n\n"
     "<b>🎵 Audio</b>\n"
     "• /audio &lt;url&gt; — descargar audio\n"
     "• /apple &lt;url&gt; — audio M4A (Apple/iPod)\n"
