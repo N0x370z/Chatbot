@@ -21,16 +21,24 @@ async def search_open_library(
 ) -> list[BookResult]:
     params = {"q": query, "limit": max(1, max_results)}
     url = f"{OPEN_LIBRARY_SEARCH_URL}?{urlencode(params)}"
+
+    # Timeout propio más generoso que el global
+    timeout = aiohttp.ClientTimeout(total=30, connect=10)
+
     try:
-        async with session.get(url) as resp:
+        async with session.get(url, timeout=timeout) as resp:
             resp.raise_for_status()
             payload = await resp.json(content_type=None)
     except asyncio.TimeoutError as e:
         logger.warning("open library timeout: %s", e)
-        raise BooksApiError("Open Library tardó demasiado en responder.") from e
+        raise BooksApiError(
+            "Open Library tardó demasiado. Prueba con /fuente gutenberg o /fuente libgen"
+        ) from e
     except aiohttp.ClientError as e:
         logger.warning("open library client error: %s", e)
-        raise BooksApiError("No se pudo contactar Open Library.") from e
+        raise BooksApiError(
+            "No se pudo contactar Open Library. Prueba con /fuente gutenberg"
+        ) from e
     except ValueError as e:
         logger.warning("open library invalid json: %s", e)
         raise BooksApiError("Open Library devolvió JSON inválido.") from e

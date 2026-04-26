@@ -28,7 +28,7 @@ class DummySession:
     def __init__(self, payload):
         self._payload = payload
 
-    def get(self, url, params=None):
+    def get(self, url, **kwargs):
         return DummyResponse(self._payload)
 
 
