@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 import aiohttp
 
 from bot.services.books_api import BookResult, BooksApiError
+from bot.services.http_utils import _retry_get
 
 logger = logging.getLogger(__name__)
 OPEN_LIBRARY_SEARCH_URL = "https://openlibrary.org/search.json"
@@ -26,9 +27,9 @@ async def search_open_library(
     timeout = aiohttp.ClientTimeout(total=30, connect=10)
 
     try:
-        async with session.get(url, timeout=timeout) as resp:
-            resp.raise_for_status()
-            payload = await resp.json(content_type=None)
+        resp = await _retry_get(session, url, timeout=timeout)
+        resp.raise_for_status()
+        payload = await resp.json(content_type=None)
     except asyncio.TimeoutError as e:
         logger.warning("open library timeout: %s", e)
         raise BooksApiError(
