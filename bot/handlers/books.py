@@ -105,6 +105,11 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         from bot.utils.converter import ConversionError, convert_book
+        
+        if last_path.suffix.lower() == f".{output_format}":
+            await msg.reply_text(f"El archivo ya está en formato {output_format.upper()}. No es necesario convertirlo.")
+            return
+            
         output_path = await convert_book(last_path, output_format)
         with output_path.open("rb") as f:
             await msg.reply_document(
@@ -114,6 +119,10 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 connect_timeout=60,
             )
         stats_from(context).mark_download(ok=True)
+        try:
+            output_path.unlink(missing_ok=True)
+        except OSError:
+            pass
     except Exception as exc:
         from bot.utils.converter import ConversionError
         stats_from(context).mark_download(ok=False)
@@ -157,22 +166,35 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             book_source = "open_library"
 
-    try:
-        if book_source == "gutenberg":
-            results = await search_gutenberg(session, q, settings.books_api_max_results)
-        elif book_source == "libgen":
-            results = await search_libgen(q, settings.books_api_max_results)
-        elif book_source == "open_library":
-            results = await search_open_library(session, q, settings.books_api_max_results)
-        elif book_source == "dbooks":
-            results = await search_dbooks(session, q, settings.books_api_max_results)
-        else:
-            results = await search_books(session, settings, q)
-            book_source = "api"
-    except BooksApiError as e:
-        logger.info("libro búsqueda: %s", e)
-        await msg.reply_text(str(e))
-        return
+    import time
+    cache = context.user_data.setdefault("book_cache", {})
+    cache_key = f"{book_source}:{q}"
+    now = time.time()
+    
+    cached = cache.get(cache_key)
+    if cached and now - cached.get("timestamp", 0) < 300:
+        logger.debug("book cache hit for %s", cache_key)
+        results = cached.get("results", [])
+    else:
+        logger.debug("book cache miss for %s", cache_key)
+        try:
+            if book_source == "gutenberg":
+                results = await search_gutenberg(session, q, settings.books_api_max_results)
+            elif book_source == "libgen":
+                results = await search_libgen(q, settings.books_api_max_results)
+            elif book_source == "open_library":
+                results = await search_open_library(session, q, settings.books_api_max_results)
+            elif book_source == "dbooks":
+                results = await search_dbooks(session, q, settings.books_api_max_results)
+            else:
+                results = await search_books(session, settings, q)
+                book_source = "api"
+        except BooksApiError as e:
+            logger.info("libro búsqueda: %s", e)
+            await msg.reply_text(str(e))
+            return
+            
+        cache[cache_key] = {"timestamp": now, "results": results}
 
     if not results:
         await msg.reply_text("No encontré resultados para esa búsqueda.")
