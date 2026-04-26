@@ -76,8 +76,8 @@ def get_settings() -> Settings:
     rl_window_raw = os.environ.get("RATE_LIMIT_WINDOW_SEC", "60").strip()
     rate_limit_window_sec = int(rl_window_raw) if rl_window_raw else 60
 
-    rl_max_raw = os.environ.get("RATE_LIMIT_MAX_REQUESTS", "3").strip()
-    rate_limit_max_requests = int(rl_max_raw) if rl_max_raw else 3
+    rl_max_raw = os.environ.get("RATE_LIMIT_MAX_REQUESTS", "10").strip()
+    rate_limit_max_requests = int(rl_max_raw) if rl_max_raw else 10
 
     books_api_base_url = os.environ.get("BOOKS_API_BASE_URL", "").strip()
     books_api_key = os.environ.get("BOOKS_API_KEY", "").strip()

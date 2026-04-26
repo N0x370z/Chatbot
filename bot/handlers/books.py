@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import io
 import logging
+from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
@@ -57,6 +58,67 @@ async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     context.user_data["book_source"] = choice
     await msg.reply_text(f"Fuente guardada: {SOURCE_LABELS[choice]}")
+
+
+async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    stats_from(context).mark_command("convertir", user.id if user else None)
+    msg = update.effective_message
+    args = context.args or []
+
+    if not args:
+        await msg.reply_html(
+            "<b>Conversión de libros</b>\n"
+            "Primero envía un PDF o EPUB al bot.\n"
+            "Luego usa: <code>/convertir &lt;formato&gt;</code>\n"
+            "Formatos: epub, pdf, mobi, azw3, txt\n\n"
+            "Ejemplo: <code>/convertir epub</code>"
+        )
+        return
+
+    output_format = args[0].strip().lower()
+    valid_formats = {"epub", "pdf", "mobi", "azw3", "txt"}
+    if output_format not in valid_formats:
+        await msg.reply_text(
+            f"Formato no válido. Usa uno de: {', '.join(sorted(valid_formats))}"
+        )
+        return
+
+    last_file = context.user_data.get("last_uploaded_file")
+    if not last_file:
+        await msg.reply_text(
+            "No hay archivo reciente. Envía un PDF o EPUB primero."
+        )
+        return
+
+    last_path = Path(last_file)
+    if not last_path.exists():
+        await msg.reply_text(
+            "El archivo ya no está disponible. Envíalo de nuevo."
+        )
+        context.user_data.pop("last_uploaded_file", None)
+        return
+
+    await msg.reply_text(f"Convirtiendo a {output_format.upper()}...")
+
+    try:
+        from bot.utils.converter import ConversionError, convert_book
+        output_path = await convert_book(last_path, output_format)
+        with output_path.open("rb") as f:
+            await msg.reply_document(
+                document=InputFile(f, filename=output_path.name),
+                read_timeout=600,
+                write_timeout=600,
+                connect_timeout=60,
+            )
+        stats_from(context).mark_download(ok=True)
+    except Exception as exc:
+        from bot.utils.converter import ConversionError
+        stats_from(context).mark_download(ok=False)
+        if isinstance(exc, ConversionError):
+            await msg.reply_text(f"Error de conversión: {exc}")
+        else:
+            await msg.reply_text("Error al enviar el archivo convertido.")
 
 
 async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -205,3 +267,4 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_book_pick, pattern=r"^book:\d+$"))
     application.add_handler(CommandHandler("fuente", cmd_fuente))
     application.add_handler(CommandHandler("libro", cmd_libro))
+    application.add_handler(CommandHandler("convertir", cmd_convertir))

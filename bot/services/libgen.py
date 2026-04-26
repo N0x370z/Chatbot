@@ -81,17 +81,22 @@ async def search_libgen(query: str, max_results: int) -> list[BookResult]:
         "res": str(max(1, max_results)),
     }
 
-    async with aiohttp.ClientSession() as session:
+    timeout = aiohttp.ClientTimeout(total=20, connect=8)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         for host in LIBGEN_HOSTS:
             try:
-                async with session.get(f"{host}{LIBGEN_SEARCH_PATH}", params=params) as resp:
+                async with session.get(
+                    f"{host}{LIBGEN_SEARCH_PATH}",
+                    params=params,
+                    timeout=timeout,
+                ) as resp:
                     resp.raise_for_status()
                     payload = await resp.text()
-            except asyncio.TimeoutError as e:
-                logger.warning("libgen timeout host=%s: %s", host, e)
+            except asyncio.TimeoutError:
+                logger.warning("libgen timeout host=%s, probando siguiente", host)
                 continue
             except aiohttp.ClientError as e:
-                logger.warning("libgen client error host=%s: %s", host, e)
+                logger.warning("libgen error host=%s: %s", host, e)
                 continue
 
             results = _parse_libgen_search_html(payload, host, max_results)
@@ -139,6 +144,8 @@ async def download_libgen(
         raise BooksApiError("ID de Libgen inválido.")
 
     limit = settings.max_file_size_bytes
+    timeout_page = aiohttp.ClientTimeout(total=20, connect=8)
+    timeout_file = aiohttp.ClientTimeout(total=120, connect=10)
 
     # Paso 1: detectar si es página intermedia o archivo directo
     # Es página intermedia si el dominio es library.lol o similar
@@ -154,7 +161,7 @@ async def download_libgen(
     if is_intermediate:
         # Paso 2: hacer GET a la página intermedia y extraer link real
         try:
-            async with session.get(book_id) as resp:
+            async with session.get(book_id, timeout=timeout_page) as resp:
                 resp.raise_for_status()
                 html_text = await resp.text(errors="replace")
         except aiohttp.ClientError as e:
@@ -182,7 +189,7 @@ async def download_libgen(
 
     # Paso 3: descargar el archivo real
     try:
-        async with session.get(download_url) as resp:
+        async with session.get(download_url, timeout=timeout_file) as resp:
             resp.raise_for_status()
             content_length = resp.content_length
             if content_length is not None and content_length > limit:
