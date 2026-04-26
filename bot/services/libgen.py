@@ -52,6 +52,26 @@ def _choose_filename(url: str, metadata_title: str | None = None) -> str:
     return f"libro_{checksum}.bin"
 
 
+def _detect_ext_by_magic(data: bytes) -> str | None:
+    if data[:4] == b"%PDF":
+        return "pdf"
+    if data[:4] == b"PK\x03\x04":
+        return "epub"
+    if data[:4] in (b"BOOK", b"\x00\x00\x00 "):
+        return "mobi"
+    return None
+
+
+def _ext_from_content_type(ctype: str) -> str | None:
+    mapping = {
+        "application/pdf": "pdf",
+        "application/epub+zip": "epub",
+        "application/x-mobipocket-ebook": "mobi",
+        "application/octet-stream": None,
+    }
+    return mapping.get(ctype)
+
+
 async def search_libgen(query: str, max_results: int) -> list[BookResult]:
     params = {
         "req": query,
@@ -119,24 +139,75 @@ async def download_libgen(
         raise BooksApiError("ID de Libgen inválido.")
 
     limit = settings.max_file_size_bytes
+
+    # Paso 1: detectar si es página intermedia o archivo directo
+    # Es página intermedia si el dominio es library.lol o similar
+    # y la ruta contiene /main/ o /fiction/
+    is_intermediate = any(
+        domain in book_id
+        for domain in ("library.lol", "libgen.lol", "libgen.rocks")
+    )
+
+    download_url = book_id
+    filename_hint = None
+
+    if is_intermediate:
+        # Paso 2: hacer GET a la página intermedia y extraer link real
+        try:
+            async with session.get(book_id) as resp:
+                resp.raise_for_status()
+                html_text = await resp.text(errors="replace")
+        except aiohttp.ClientError as e:
+            raise BooksApiError("No se pudo acceder a la página de descarga.") from e
+
+        # Extraer href que contiene el archivo real
+        # Buscar <a href="https://...get.php..."> o <a id="download" href="...">
+        match = re.search(
+            r'href=["\']('
+            r'https?://[^"\']*(?:get\.php|/get/)[^"\']*'
+            r')["\']',
+            html_text,
+        )
+        if not match:
+            # Segundo intento: buscar cualquier link de descarga directa
+            match = re.search(
+                r'<a[^>]+id=["\']download["\'][^>]*href=["\']([^"\']+)["\']',
+                html_text,
+            )
+        if not match:
+            raise BooksApiError(
+                "No se encontró el link de descarga en la página de Libgen."
+            )
+        download_url = match.group(1)
+
+    # Paso 3: descargar el archivo real
     try:
-        async with session.get(book_id) as resp:
+        async with session.get(download_url) as resp:
             resp.raise_for_status()
             content_length = resp.content_length
             if content_length is not None and content_length > limit:
                 raise BooksApiError(
-                    f"El archivo remoto (~{content_length // (1024 * 1024)} MB) supera el límite."
+                    f"El archivo (~{content_length // (1024*1024)} MB) supera el límite."
                 )
             data = await resp.read()
-    except asyncio.TimeoutError as e:
-        logger.warning("libgen download timeout: %s", e)
-        raise BooksApiError("Libgen tardó demasiado en responder.") from e
+            cd = resp.headers.get("Content-Disposition", "")
+            ctype = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
     except aiohttp.ClientError as e:
-        logger.warning("libgen download client error: %s", e)
         raise BooksApiError("No se pudo descargar el libro desde Libgen.") from e
 
     if len(data) > limit:
         raise BooksApiError("El archivo descargado supera MAX_FILE_SIZE_MB.")
 
-    filename = _choose_filename(book_id)
+    # Detectar extensión real por magic bytes
+    ext = _detect_ext_by_magic(data) or _ext_from_content_type(ctype) or "bin"
+
+    # Nombre desde Content-Disposition o fallback
+    filename = None
+    if "filename=" in cd:
+        part = cd.split("filename=", 1)[1].strip().strip('"').split(";")[0].strip()
+        if part:
+            filename = part
+    if not filename:
+        filename = f"{_safe_filename(book_id)}.{ext}"
+
     return data, filename

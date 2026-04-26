@@ -2,6 +2,7 @@
 python-telegram-bot>=21.0,<23
 python-dotenv>=1.0.0
 aiohttp>=3.9.0
+yarl>=1.9.0
 
 # Descargas y subida de archivos (libros / audio / video / documentos)
 yt-dlp>=2024.1.0
