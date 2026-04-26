@@ -7,30 +7,39 @@ WELCOME_HTML = (
 )
 
 HELP_HTML = (
-    "<b>Comandos</b>\n"
-    "• /libro &lt;título o autor&gt; — libros vía API (configura BOOKS_API_BASE_URL)\n"
-    "• /audio &lt;url&gt; — audio\n"
-    "• /video &lt;url&gt; — video (MP4 cuando es posible)\n"
-    "• /apple &lt;url&gt; — audio M4A (Apple)\n"
+    "<b>📚 Libros</b>\n"
+    "• /libro &lt;título o autor&gt; — buscar y descargar libro\n"
+    "• /fuente — elegir fuente (Open Library / Gutenberg / Libgen)\n\n"
+    "<b>🎵 Audio</b>\n"
+    "• /audio &lt;url&gt; — descargar audio\n"
+    "• /apple &lt;url&gt; — audio M4A (Apple/iPod)\n"
+    "• /formato_audio — elegir formato (MP3 / M4A / OPUS / FLAC)\n\n"
+    "<b>🎬 Video</b>\n"
+    "• /video &lt;url&gt; — descargar video (MP4, mínimo 480p)\n\n"
+    "<b>⚙️ General</b>\n"
     "• /ayuda — esta lista\n"
-    "• /ping — prueba rápida de vida\n"
-    "• /jobs — ver estado de descargas en cola\n"
-    "• Enviar PDF/EPUB — guarda el archivo en almacenamiento local\n"
-    "• /stats — uso (solo administrador)\n\n"
+    "• /ping — prueba de conexión\n"
+    "• /jobs — estado de descargas en cola\n"
+    "• Enviar PDF/EPUB — guardar en biblioteca\n"
+    "• /stats — estadísticas (solo admin)\n\n"
     "<b>Ejemplo</b>\n"
-    "<code>/audio https://www.youtube.com/watch?v=…</code>"
+    "<code>/fuente libgen</code>\n"
+    "<code>/libro hacking the art of exploitation</code>\n"
+    "<code>/formato_audio opus</code>\n"
+    "<code>/audio https://youtu.be/...</code>"
 )
 
 MENU_HINTS_HTML = {
     "books": (
         "<b>Buscar libro</b>\n"
         "Comando: <code>/libro &lt;título o autor&gt;</code>\n"
-        "Requiere <code>BOOKS_API_BASE_URL</code> en <code>.env</code>.\n"
+        "Usa <code>/fuente</code> para elegir entre Open Library, Gutenberg o Libgen.\n"
         "Ejemplo: <code>/libro harry potter</code>"
     ),
     "audio": (
         "<b>Descargar audio</b>\n"
         "Envía: <code>/audio &lt;url&gt;</code>\n"
+        "Usa <code>/formato_audio</code> para elegir formato: MP3, M4A, OPUS o FLAC.\n"
         "Ejemplo: <code>/audio https://youtu.be/...</code>"
     ),
     "video": (

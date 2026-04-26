@@ -14,9 +14,11 @@ from yt_dlp.utils import DownloadError
 
 from bot.config import Settings
 from bot.services.ytdlp_download import (
+    DownloadQualityError,
     DownloadTooLargeError,
     cleanup_download,
     download_apple_m4a,
+    download_audio_format,
     download_best_audio,
     download_best_video,
 )
@@ -42,6 +44,7 @@ class DownloadJob:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    audio_format: str = "mp3"
 
 
 class DownloadQueue:
@@ -64,6 +67,7 @@ class DownloadQueue:
         url: str,
         chat_id: int,
         user_id: int,
+        audio_format: str = "mp3",
     ) -> DownloadJob:
         self.ensure_started(application)
         job = DownloadJob(
@@ -72,6 +76,7 @@ class DownloadQueue:
             url=url,
             chat_id=chat_id,
             user_id=user_id,
+            audio_format=audio_format,
         )
         self._jobs[job.id] = job
         await self._queue.put(job)
@@ -96,8 +101,15 @@ class DownloadQueue:
         try:
             if job.kind in ("audio", "apple"):
                 await bot.send_chat_action(chat_id=job.chat_id, action=ChatAction.UPLOAD_VOICE)
-                fn = download_apple_m4a if job.kind == "apple" else download_best_audio
-                path = await asyncio.to_thread(fn, job.url, self.settings)
+                if job.kind == "apple":
+                    fn = download_apple_m4a
+                    path = await asyncio.to_thread(fn, job.url, self.settings)
+                elif job.audio_format in {"m4a", "opus", "flac", "aac"}:
+                    path = await asyncio.to_thread(
+                        download_audio_format, job.url, self.settings, job.audio_format,
+                    )
+                else:
+                    path = await asyncio.to_thread(download_best_audio, job.url, self.settings)
                 await send_audio_or_document(bot, chat_id=job.chat_id, path=path)
             else:
                 await bot.send_chat_action(chat_id=job.chat_id, action=ChatAction.UPLOAD_VIDEO)
@@ -111,6 +123,11 @@ class DownloadQueue:
             job.error = f"Archivo supera {self.settings.max_file_size_mb} MB."
             self.stats.mark_download(ok=False)
             await bot.send_message(chat_id=job.chat_id, text=job.error)
+        except DownloadQualityError as exc:
+            job.status = "failed"
+            job.error = str(exc)[:400]
+            self.stats.mark_download(ok=False)
+            await bot.send_message(chat_id=job.chat_id, text=f"Error de calidad: {exc}")
         except (DownloadError, ValueError) as exc:
             job.status = "failed"
             job.error = str(exc)[:400]
