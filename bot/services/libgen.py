@@ -15,10 +15,10 @@ from bot.services.books_api import BookResult, BooksApiError
 
 logger = logging.getLogger(__name__)
 LIBGEN_HOSTS = (
+    "https://libgen.li",
     "https://libgen.is",
     "https://libgen.rs",
     "https://libgen.st",
-    "https://libgen.li",
 )
 LIBGEN_SEARCH_PATH = "/search.php"
 
@@ -82,11 +82,13 @@ async def search_libgen(query: str, max_results: int) -> list[BookResult]:
     }
 
     timeout = aiohttp.ClientTimeout(total=20, connect=8)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    connector = aiohttp.TCPConnector(ssl=False)
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         for host in LIBGEN_HOSTS:
+            path = "/index.php" if "libgen.li" in host else LIBGEN_SEARCH_PATH
             try:
                 async with session.get(
-                    f"{host}{LIBGEN_SEARCH_PATH}",
+                    f"{host}{path}",
                     params=params,
                     timeout=timeout,
                 ) as resp:
@@ -113,14 +115,25 @@ def _parse_libgen_search_html(html_payload: str, host: str, max_results: int) ->
         if "<th" in row.lower():
             continue
         cells = re.findall(r"<td[^>]*>(.*?)</td>", row, flags=re.S | re.I)
-        if len(cells) < 10:
+        if len(cells) < 9:
             continue
-        title_html = cells[2]
+            
+        if "libgen.li" in host:
+            title_html = cells[0]
+            author_html = cells[1]
+            mirrors_html = cells[8]
+        else:
+            if len(cells) < 10:
+                continue
+            title_html = cells[2]
+            author_html = cells[1]
+            mirrors_html = cells[9]
+            
         title = _clean_text(title_html)
         if not title:
             continue
-        author = _clean_text(cells[1])
-        download_links = re.findall(r'href=["\']([^"\']+)["\']', cells[9])
+        author = _clean_text(author_html)
+        download_links = re.findall(r'href=["\']([^"\']+)["\']', mirrors_html)
         if not download_links:
             continue
         download_url = download_links[0]
@@ -149,10 +162,10 @@ async def download_libgen(
 
     # Paso 1: detectar si es página intermedia o archivo directo
     # Es página intermedia si el dominio es library.lol o similar
-    # y la ruta contiene /main/ o /fiction/
+    # y la ruta contiene /main/ o /fiction/ o ads.php
     is_intermediate = any(
         domain in book_id
-        for domain in ("library.lol", "libgen.lol", "libgen.rocks")
+        for domain in ("library.lol", "libgen.lol", "libgen.rocks", "ads.php")
     )
 
     download_url = book_id
@@ -161,17 +174,20 @@ async def download_libgen(
     if is_intermediate:
         # Paso 2: hacer GET a la página intermedia y extraer link real
         try:
-            async with session.get(book_id, timeout=timeout_page) as resp:
-                resp.raise_for_status()
-                html_text = await resp.text(errors="replace")
+            # Usar SSL bypass para intermediate pages si es libgen.li
+            connector = aiohttp.TCPConnector(ssl=False) if "libgen.li" in book_id else None
+            async with aiohttp.ClientSession(connector=connector) as tmp_session:
+                async with tmp_session.get(book_id, timeout=timeout_page) as resp:
+                    resp.raise_for_status()
+                    html_text = await resp.text(errors="replace")
         except aiohttp.ClientError as e:
             raise BooksApiError("No se pudo acceder a la página de descarga.") from e
 
         # Extraer href que contiene el archivo real
-        # Buscar <a href="https://...get.php..."> o <a id="download" href="...">
+        # Buscar <a href="https://...get.php..."> o <a href="get.php..."> o <a id="download" href="...">
         match = re.search(
             r'href=["\']('
-            r'https?://[^"\']*(?:get\.php|/get/)[^"\']*'
+            r'(?:https?://[^"\']*)?(?:get\.php|/get/)[^"\']*'
             r')["\']',
             html_text,
         )
@@ -186,20 +202,26 @@ async def download_libgen(
                 "No se encontró el link de descarga en la página de Libgen."
             )
         download_url = match.group(1)
+        if download_url.startswith("get.php") or download_url.startswith("/get.php"):
+            parsed = urlparse(book_id)
+            download_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", download_url)
 
     # Paso 3: descargar el archivo real
     try:
-        async with session.get(download_url, timeout=timeout_file) as resp:
-            resp.raise_for_status()
-            content_length = resp.content_length
-            if content_length is not None and content_length > limit:
-                raise BooksApiError(
-                    f"El archivo (~{content_length // (1024*1024)} MB) supera el límite."
-                )
-            data = await resp.read()
-            cd = resp.headers.get("Content-Disposition", "")
-            ctype = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        connector = aiohttp.TCPConnector(ssl=False) if "libgen.li" in download_url else None
+        async with aiohttp.ClientSession(connector=connector) as tmp_session:
+            async with tmp_session.get(download_url, timeout=timeout_file) as resp:
+                resp.raise_for_status()
+                content_length = resp.content_length
+                if content_length is not None and content_length > limit:
+                    raise BooksApiError(
+                        f"El archivo (~{content_length // (1024*1024)} MB) supera el límite."
+                    )
+                data = await resp.read()
+                cd = resp.headers.get("Content-Disposition", "")
+                ctype = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
     except aiohttp.ClientError as e:
+        logger.error("Download failed from %s: %s", download_url, e)
         raise BooksApiError("No se pudo descargar el libro desde Libgen.") from e
 
     if len(data) > limit:

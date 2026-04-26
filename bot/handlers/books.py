@@ -13,6 +13,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from bot.deps import http_session_from, limiter_from, settings_from, stats_from
 from bot.handlers import menu
 from bot.services.books_api import BookResult, BooksApiError, download_book_bytes, search_books
+from bot.services.dbooks import download_dbooks, search_dbooks
 from bot.services.gutenberg import download_gutenberg, search_gutenberg
 from bot.services.libgen import download_libgen, search_libgen
 from bot.services.open_library import search_open_library
@@ -20,11 +21,12 @@ from bot.services.open_library import search_open_library
 logger = logging.getLogger(__name__)
 
 BOOK_PREFIX = "book:"
-BOOK_SOURCES = ("gutenberg", "libgen", "open_library")
+BOOK_SOURCES = ("gutenberg", "libgen", "open_library", "dbooks")
 SOURCE_LABELS = {
     "gutenberg": "Gutenberg",
     "libgen": "Libgen",
     "open_library": "Open Library",
+    "dbooks": "DBooks",
 }
 
 
@@ -44,7 +46,7 @@ async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         current = context.user_data.get("book_source", "open_library")
         label = SOURCE_LABELS.get(current, current)
         await msg.reply_text(
-            "Selecciona la fuente de libros con /fuente <opción>. Opciones: gutenberg, libgen, open_library.\n"
+            "Selecciona la fuente de libros con /fuente <opción>. Opciones: gutenberg, libgen, open_library, dbooks.\n"
             f"Fuente actual: {label}"
         )
         return
@@ -52,7 +54,7 @@ async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     choice = args[0].strip().lower()
     if choice not in BOOK_SOURCES:
         await msg.reply_text(
-            "Fuente no válida. Usa /fuente gutenberg, /fuente libgen o /fuente open_library."
+            "Fuente no válida. Usa /fuente gutenberg, /fuente libgen, /fuente open_library o /fuente dbooks."
         )
         return
 
@@ -162,6 +164,8 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             results = await search_libgen(q, settings.books_api_max_results)
         elif book_source == "open_library":
             results = await search_open_library(session, q, settings.books_api_max_results)
+        elif book_source == "dbooks":
+            results = await search_dbooks(session, q, settings.books_api_max_results)
         else:
             results = await search_books(session, settings, q)
             book_source = "api"
@@ -239,6 +243,8 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             data, filename = await download_gutenberg(session, book_id, settings)
         elif source == "libgen":
             data, filename = await download_libgen(session, book_id, settings)
+        elif source == "dbooks":
+            data, filename = await download_dbooks(session, book_id, settings)
         else:
             data, filename = await download_book_bytes(session, settings, book_id)
 
