@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
-from bot.services.libgen import _parse_libgen_search_html
+from bot.services.libgen import _parse_libgen_search_html, _safe_filename
+
+def test_safe_filename() -> None:
+    # spaces converted to underscores and special chars stripped
+    assert _safe_filename("Hola Mundo!?*") == "Hola_Mundo"
+    # empty string -> "libro"
+    assert _safe_filename("   ") == "libro"
+    assert _safe_filename("!?*") == "libro"
+    # longer than 80 chars truncated
+    long_name = "a" * 100
+    assert _safe_filename(long_name) == "a" * 80
+
 
 
 def test_parse_libgen_search_html_extracts_download_urls() -> None:

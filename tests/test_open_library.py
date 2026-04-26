@@ -1,4 +1,4 @@
-"""Tests de integración de Gutenberg."""
+"""Tests de integración de Open Library."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import asyncio
 import pytest
 import aiohttp
 from bot.services.books_api import BooksApiError
-from bot.services.gutenberg import search_gutenberg
+from bot.services.open_library import search_open_library
 
 
 class DummyResponse:
@@ -45,47 +45,47 @@ class DummySession:
         return resp
 
 
-def test_search_gutenberg_parses_results() -> None:
+def test_search_open_library_parses_results() -> None:
     payload = {
-        "results": [
+        "docs": [
             {
-                "id": 123,
-                "title": "Test Book",
-                "authors": [{"name": "Ana Autor"}],
+                "key": "OL123M",
+                "title": "Test OL Book",
+                "author_name": ["Ana OL"],
             },
             {
-                "id": 124,
-                "title": "Another Book",
-                "authors": [{"name": "Bob Autor"}],
+                "key": "OL124M",
+                "title": "Another OL Book",
+                "author_name": ["Bob OL"],
             }
         ]
     }
     session = DummySession([DummyResponse(payload)])
-    results = asyncio.run(search_gutenberg(session, "test", 5))
+    results = asyncio.run(search_open_library(session, "test", 5))
     assert len(results) == 2
-    assert results[0].id == "123"
-    assert results[0].title == "Test Book - Ana Autor"
+    assert results[0].id == "OL123M"
+    assert results[0].title == "Test OL Book - Ana OL"
 
 
-def test_search_gutenberg_empty() -> None:
-    session = DummySession([DummyResponse({"results": []})])
-    results = asyncio.run(search_gutenberg(session, "test", 5))
+def test_search_open_library_empty() -> None:
+    session = DummySession([DummyResponse({"docs": []})])
+    results = asyncio.run(search_open_library(session, "test", 5))
     assert results == []
 
 
-def test_search_gutenberg_timeout() -> None:
+def test_search_open_library_timeout() -> None:
     session = DummySession([asyncio.TimeoutError(), asyncio.TimeoutError(), asyncio.TimeoutError()])
-    with pytest.raises(BooksApiError, match="Gutenberg tardó demasiado en responder."):
-        asyncio.run(search_gutenberg(session, "test", 5))
+    with pytest.raises(BooksApiError, match="Open Library tardó demasiado."):
+        asyncio.run(search_open_library(session, "test", 5))
 
 
-def test_search_gutenberg_malformed_json() -> None:
+def test_search_open_library_malformed_json() -> None:
     session = DummySession([DummyResponse(ValueError("Bad JSON"))])
-    with pytest.raises(BooksApiError, match="Gutenberg devolvió JSON inválido."):
-        asyncio.run(search_gutenberg(session, "test", 5))
+    with pytest.raises(BooksApiError, match="Open Library devolvió JSON inválido."):
+        asyncio.run(search_open_library(session, "test", 5))
 
 
-def test_search_gutenberg_4xx() -> None:
+def test_search_open_library_4xx() -> None:
     session = DummySession([DummyResponse(None, status=404)])
-    with pytest.raises(BooksApiError, match="No se pudo contactar Gutenberg."):
-        asyncio.run(search_gutenberg(session, "test", 5))
+    with pytest.raises(BooksApiError, match="No se pudo contactar Open Library."):
+        asyncio.run(search_open_library(session, "test", 5))
