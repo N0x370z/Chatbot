@@ -142,7 +142,7 @@ def download_best_video(url: str, settings: Settings) -> Path:
     """Mejor formato combinado o único que suela ser MP4/WebM."""
     work_dir = _work_dir(settings)
     opts: dict = {
-        "format": "bv*[height>=480]+ba/bv*+ba/b/bestvideo+bestaudio/best",
+        "format": "18/bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/best",
         "merge_output_format": "mp4",
         "prefer_free_formats": False,
         "outtmpl": str(work_dir / "%(title).80B [%(id)s].%(ext)s"),
@@ -151,6 +151,20 @@ def download_best_video(url: str, settings: Settings) -> Path:
         "noplaylist": True,
         "writethumbnail": False,
         "writeinfojson": False,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"],
+            },
+        },
+        "postprocessors": [
+            {
+                "key": "FFmpegMetadataPP",
+            },
+            {
+                "key": "FFmpegVideoRemuxer",
+                "preferedformat": "mp4",
+            },
+        ],
     }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
