@@ -142,8 +142,9 @@ def download_best_video(url: str, settings: Settings) -> Path:
     """Mejor formato combinado o único que suela ser MP4/WebM."""
     work_dir = _work_dir(settings)
     opts: dict = {
-        "format": "bv*[height>=480][ext=mp4]+ba/bv*[height>=480]+ba/b[height>=480]/b",
+        "format": "bv*[height>=480]+ba/bv*+ba/b/bestvideo+bestaudio/best",
         "merge_output_format": "mp4",
+        "prefer_free_formats": False,
         "outtmpl": str(work_dir / "%(title).80B [%(id)s].%(ext)s"),
         "quiet": True,
         "no_warnings": True,

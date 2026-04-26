@@ -3,7 +3,8 @@
 WELCOME_HTML = (
     "¡Hola! Soy <b>TelegramMediaBot</b>.\n\n"
     "Elige una opción del menú y te digo exactamente qué comando usar.\n\n"
-    "<b>Tip rápido</b>: para descargar pega una URL con /audio o /video."
+    "<b>Tip rápido</b>: para descargar pega una URL con /audio o /video.\n\n"
+    "<b>Para libros</b>: usa /fuente para elegir fuente si una falla."
 )
 
 HELP_HTML = (

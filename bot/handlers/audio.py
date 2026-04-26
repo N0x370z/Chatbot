@@ -20,7 +20,9 @@ async def cmd_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not url:
         await update.effective_message.reply_text(
             "Uso: /audio <url>\n"
-            "Ejemplo: /audio https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            "Ejemplo: /audio https://www.youtube.com/watch?v=dQw4w9WgXcQ\n\n"
+            "Fuentes soportadas: YouTube, SoundCloud, Bandcamp.\n"
+            "Apple Music y Spotify NO son compatibles por DRM."
         )
         return
     user_id = user.id if user else None

@@ -132,10 +132,18 @@ class DownloadQueue:
             job.status = "failed"
             job.error = str(exc)[:400]
             self.stats.mark_download(ok=False)
-            await bot.send_message(
-                chat_id=job.chat_id,
-                text="Descarga fallida. Revisa la URL y FFmpeg.",
-            )
+            msg = str(exc)[:300]
+            if "ffmpeg" in msg.lower():
+                user_msg = "FFmpeg no está instalado. Instálalo con: brew install ffmpeg (Mac) o sudo apt install ffmpeg (Linux)"
+            elif "unsupported url" in msg.lower():
+                user_msg = "URL no soportada. Usa YouTube, SoundCloud o Bandcamp."
+            elif "private" in msg.lower():
+                user_msg = "Video privado o con restricción de región."
+            elif "copyright" in msg.lower():
+                user_msg = "Video bloqueado por copyright."
+            else:
+                user_msg = f"Descarga fallida: {msg}"
+            await bot.send_message(chat_id=job.chat_id, text=user_msg)
         except OSError:
             job.status = "failed"
             job.error = "Error al enviar archivo."
