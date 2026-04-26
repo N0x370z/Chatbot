@@ -90,7 +90,8 @@ class DownloadQueue:
     async def _worker(self, application: Application) -> None:
         while True:
             job = await self._queue.get()
-            await self._run_job(application, job)
+            if job.status != "failed":
+                await self._run_job(application, job)
             self._queue.task_done()
 
     async def _run_job(self, application: Application, job: DownloadJob) -> None:
@@ -98,22 +99,27 @@ class DownloadQueue:
         job.status = "running"
         job.started_at = datetime.now(UTC)
         path = None
+        work_dir = None
+        
         try:
+            loop = asyncio.get_running_loop()
             if job.kind in ("audio", "apple"):
-                await bot.send_chat_action(chat_id=job.chat_id, action=ChatAction.UPLOAD_VOICE)
+                msg = await bot.send_message(chat_id=job.chat_id, text="Preparando descarga...")
                 if job.kind == "apple":
                     fn = download_apple_m4a
-                    path = await asyncio.to_thread(fn, job.url, self.settings)
+                    path, work_dir = await asyncio.to_thread(fn, job.url, self.settings, bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop)
                 elif job.audio_format in {"m4a", "opus", "flac", "aac"}:
-                    path = await asyncio.to_thread(
-                        download_audio_format, job.url, self.settings, job.audio_format,
+                    path, work_dir = await asyncio.to_thread(
+                        download_audio_format, job.url, self.settings, job.audio_format, bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop
                     )
                 else:
-                    path = await asyncio.to_thread(download_best_audio, job.url, self.settings)
+                    path, work_dir = await asyncio.to_thread(download_best_audio, job.url, self.settings, bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop)
+                await bot.delete_message(chat_id=job.chat_id, message_id=msg.message_id)
                 await send_audio_or_document(bot, chat_id=job.chat_id, path=path)
             else:
-                await bot.send_chat_action(chat_id=job.chat_id, action=ChatAction.UPLOAD_VIDEO)
-                path = await asyncio.to_thread(download_best_video, job.url, self.settings)
+                msg = await bot.send_message(chat_id=job.chat_id, text="Preparando descarga...")
+                path, work_dir = await asyncio.to_thread(download_best_video, job.url, self.settings, bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop)
+                await bot.delete_message(chat_id=job.chat_id, message_id=msg.message_id)
                 await send_video_or_document(bot, chat_id=job.chat_id, path=path)
 
             job.status = "done"
@@ -151,5 +157,8 @@ class DownloadQueue:
             await bot.send_message(chat_id=job.chat_id, text=job.error)
         finally:
             job.finished_at = datetime.now(UTC)
+            if work_dir is not None and work_dir.exists():
+                import shutil
+                shutil.rmtree(work_dir, ignore_errors=True)
             if path is not None and path.exists():
                 cleanup_download(path)
