@@ -89,7 +89,29 @@ def _validate_media(path: Path, *, min_bytes: int, min_duration: float | None, i
             )
 
 
-def download_best_audio(url: str, settings: Settings) -> Path:
+def _make_progress_hook(bot, chat_id, message_id, loop):
+    import time
+    import asyncio
+    last_edit = [time.time()]
+    def hook(d: dict):
+        if not bot or not chat_id or not message_id or not loop:
+            return
+        if d.get("status") == "downloading":
+            now = time.time()
+            if now - last_edit[0] > 10.0:
+                last_edit[0] = now
+                pct = d.get("_percent_str", "0%").strip()
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        bot.edit_message_text(f"Descargando... {pct}", chat_id=chat_id, message_id=message_id),
+                        loop
+                    )
+                except Exception:
+                    pass
+    return hook
+
+
+def download_best_audio(url: str, settings: Settings, bot=None, chat_id=None, message_id=None, loop=None) -> tuple[Path, Path]:
     """MP3/M4A/WebM según lo que entregue la fuente (sin conversión forzada)."""
     work_dir = _work_dir(settings)
     opts: dict = {
@@ -98,6 +120,7 @@ def download_best_audio(url: str, settings: Settings) -> Path:
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
     }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -105,13 +128,13 @@ def download_best_audio(url: str, settings: Settings) -> Path:
             path = _finalize_path(work_dir, ydl, info)
         _validate_media(path, min_bytes=50_000, min_duration=10.0, info=info)
         _assert_under_limit(path, settings)
-        return path
+        return path, work_dir
     except (DownloadError, DownloadQualityError):
         shutil.rmtree(work_dir, ignore_errors=True)
         raise
 
 
-def download_apple_m4a(url: str, settings: Settings) -> Path:
+def download_apple_m4a(url: str, settings: Settings, bot=None, chat_id=None, message_id=None, loop=None) -> tuple[Path, Path]:
     """Audio en M4A vía FFmpeg (útil para ecosistema Apple)."""
     work_dir = _work_dir(settings)
     opts: dict = {
@@ -120,6 +143,7 @@ def download_apple_m4a(url: str, settings: Settings) -> Path:
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -132,13 +156,13 @@ def download_apple_m4a(url: str, settings: Settings) -> Path:
             info = ydl.extract_info(url, download=True)
             path = _finalize_path(work_dir, ydl, info)
         _assert_under_limit(path, settings)
-        return path
+        return path, work_dir
     except DownloadError:
         shutil.rmtree(work_dir, ignore_errors=True)
         raise
 
 
-def download_best_video(url: str, settings: Settings) -> Path:
+def download_best_video(url: str, settings: Settings, bot=None, chat_id=None, message_id=None, loop=None) -> tuple[Path, Path]:
     """Mejor formato combinado o único que suela ser MP4/WebM."""
     work_dir = _work_dir(settings)
     opts: dict = {
@@ -151,6 +175,7 @@ def download_best_video(url: str, settings: Settings) -> Path:
         "noplaylist": True,
         "writethumbnail": False,
         "writeinfojson": False,
+        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "web"],
@@ -172,13 +197,13 @@ def download_best_video(url: str, settings: Settings) -> Path:
             path = _finalize_path(work_dir, ydl, info)
         _validate_media(path, min_bytes=500_000, min_duration=5.0, info=info)
         _assert_under_limit(path, settings)
-        return path
+        return path, work_dir
     except (DownloadError, DownloadQualityError):
         shutil.rmtree(work_dir, ignore_errors=True)
         raise
 
 
-def download_audio_format(url: str, settings: Settings, fmt: str) -> Path:
+def download_audio_format(url: str, settings: Settings, fmt: str, bot=None, chat_id=None, message_id=None, loop=None) -> tuple[Path, Path]:
     VALID_FMTS = {"mp3", "m4a", "opus", "flac", "aac"}
     if fmt not in VALID_FMTS:
         raise ValueError(f"Formato no soportado: {fmt}")
@@ -191,6 +216,7 @@ def download_audio_format(url: str, settings: Settings, fmt: str) -> Path:
         "noplaylist": True,
         "writethumbnail": False,
         "writeinfojson": False,
+        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -204,7 +230,7 @@ def download_audio_format(url: str, settings: Settings, fmt: str) -> Path:
             path = _finalize_path(work_dir, ydl, info)
         _validate_media(path, min_bytes=50_000, min_duration=10.0, info=info)
         _assert_under_limit(path, settings)
-        return path
+        return path, work_dir
     except (DownloadError, DownloadQualityError):
         shutil.rmtree(work_dir, ignore_errors=True)
         raise

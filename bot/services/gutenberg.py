@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 import aiohttp
 
 from bot.services.books_api import BookResult, BooksApiError
+from bot.services.http_utils import _retry_get
 
 logger = logging.getLogger(__name__)
 GUTENDEX_SEARCH_URL = "https://gutendex.com/books"
@@ -32,9 +33,9 @@ async def search_gutenberg(
     timeout = aiohttp.ClientTimeout(total=30, connect=10)
 
     try:
-        async with session.get(url, timeout=timeout) as resp:
-            resp.raise_for_status()
-            payload = await resp.json(content_type=None)
+        resp = await _retry_get(session, url, timeout=timeout)
+        resp.raise_for_status()
+        payload = await resp.json(content_type=None)
     except asyncio.TimeoutError as e:
         logger.warning("gutenberg timeout: %s", e)
         raise BooksApiError("Gutenberg tardó demasiado en responder.") from e
@@ -80,9 +81,9 @@ async def download_gutenberg(
 ) -> tuple[bytes, str]:
     url = f"{GUTENDEX_BOOK_URL}/{book_id}"
     try:
-        async with session.get(url) as resp:
-            resp.raise_for_status()
-            payload = await resp.json(content_type=None)
+        resp = await _retry_get(session, url)
+        resp.raise_for_status()
+        payload = await resp.json(content_type=None)
     except asyncio.TimeoutError as e:
         logger.warning("gutenberg metadata timeout: %s", e)
         raise BooksApiError("Gutenberg tardó demasiado en responder.") from e
@@ -105,14 +106,14 @@ async def download_gutenberg(
 
     limit = settings.max_file_size_bytes
     try:
-        async with session.get(epub_url) as resp:
-            resp.raise_for_status()
-            content_length = resp.content_length
-            if content_length is not None and content_length > limit:
-                raise BooksApiError(
-                    f"El archivo remoto (~{content_length // (1024 * 1024)} MB) supera el límite."
-                )
-            data = await resp.read()
+        resp = await _retry_get(session, epub_url)
+        resp.raise_for_status()
+        content_length = resp.content_length
+        if content_length is not None and content_length > limit:
+            raise BooksApiError(
+                f"El archivo remoto (~{content_length // (1024 * 1024)} MB) supera el límite."
+            )
+        data = await resp.read()
     except aiohttp.ClientError as e:
         logger.warning("gutenberg download client error: %s", e)
         raise BooksApiError("No se pudo descargar el EPUB de Gutenberg.") from e

@@ -24,7 +24,8 @@ LIBGEN_SEARCH_PATH = "/search.php"
 
 
 def _safe_filename(name: str) -> str:
-    base = re.sub(r"[^\w\-.]+", "_", name.strip())[:80]
+    base = re.sub(r"[^\w\-.]+", "_", name.strip())
+    base = base.strip("_")[:80]
     return base or "libro"
 
 
@@ -207,8 +208,14 @@ async def download_libgen(
             download_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", download_url)
 
     # Paso 3: descargar el archivo real
+    allowed_domains = ["libgen.li", "libgen.is", "libgen.rs", "libgen.st"]
+    parsed_download_url = urlparse(download_url)
+    
+    if not any(d in parsed_download_url.netloc for d in allowed_domains):
+        raise BooksApiError(f"El dominio de descarga no está permitido: {parsed_download_url.netloc}")
+
     try:
-        connector = aiohttp.TCPConnector(ssl=False) if "libgen.li" in download_url else None
+        connector = aiohttp.TCPConnector(ssl=False)
         async with aiohttp.ClientSession(connector=connector) as tmp_session:
             async with tmp_session.get(download_url, timeout=timeout_file) as resp:
                 resp.raise_for_status()

@@ -43,6 +43,14 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.info("Archivo rechazado: nombre=%s mime=%s", document.file_name, document.mime_type)
         return
 
+    extension = Path(document.file_name or "").suffix.lower()
+    mime_type = (document.mime_type or "").lower()
+    
+    if (extension == ".pdf" and mime_type == "application/epub+zip") or (extension == ".epub" and mime_type == "application/pdf"):
+        warning_msg = f"Advertencia: la extensión del archivo ({extension}) no coincide con su tipo detectado ({mime_type})."
+        logger.warning("Mismatch de extensión/MIME: nombre=%s mime=%s", document.file_name, mime_type)
+        await message.reply_text(warning_msg)
+
     settings = settings_from(context)
     if document.file_size and document.file_size > settings.max_upload_size_bytes:
         await message.reply_text(
