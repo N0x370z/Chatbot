@@ -29,7 +29,7 @@ async def post_init(application: Application) -> None:
     if settings.books_api_key:
         headers["Authorization"] = f"Bearer {settings.books_api_key}"
     timeout = aiohttp.ClientTimeout(total=settings.books_api_timeout_sec)
-    connector = aiohttp.TCPConnector(ssl=False)
+    connector = aiohttp.TCPConnector(ssl=settings.ssl_verify)
     application.bot_data["http_session"] = aiohttp.ClientSession(
         headers=headers,
         timeout=timeout,
