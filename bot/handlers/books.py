@@ -39,6 +39,32 @@ def _button_label(title: str, *, max_len: int = 58) -> str:
     return t if len(t) <= max_len else f"{t[: max_len - 3]}..."
 
 
+def _build_books_keyboard(pending: list[dict], page: int, page_size: int) -> InlineKeyboardMarkup:
+    start = page * page_size
+    end = start + page_size
+    page_items = pending[start:end]
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                _button_label(item["title"]),
+                callback_data=f"{BOOK_PREFIX}{start + i}",
+            )
+        ]
+        for i, item in enumerate(page_items)
+    ]
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"bpage:{page - 1}"))
+    if end < len(pending):
+        nav_row.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"bpage:{page + 1}"))
+    if nav_row:
+        keyboard.append(nav_row)
+
+    return InlineKeyboardMarkup(keyboard)
+
+
 async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     stats = stats_from(context)
@@ -194,18 +220,19 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         logger.debug("book cache miss for %s", cache_key)
         try:
+            fetch_limit = settings.books_api_max_results * 4  # fetch up to 4 pages
             if book_source == "gutenberg":
-                results = await search_gutenberg(session, q, settings.books_api_max_results)
+                results = await search_gutenberg(session, q, fetch_limit)
             elif book_source == "libgen":
-                results = await search_libgen(q, settings.books_api_max_results)
+                results = await search_libgen(q, fetch_limit)
             elif book_source == "open_library":
-                results = await search_open_library(session, q, settings.books_api_max_results)
+                results = await search_open_library(session, q, fetch_limit)
             elif book_source == "dbooks":
-                results = await search_dbooks(session, q, settings.books_api_max_results)
+                results = await search_dbooks(session, q, fetch_limit)
             elif book_source == "internet_archive":
-                results = await search_internet_archive(session, q, settings.books_api_max_results)
+                results = await search_internet_archive(session, q, fetch_limit)
             elif book_source == "standard_ebooks":
-                results = await search_standard_ebooks(session, q, settings.books_api_max_results)
+                results = await search_standard_ebooks(session, q, fetch_limit)
             else:
                 results = await search_books(session, settings, q)
                 book_source = "api"
@@ -223,20 +250,41 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data["books_pending"] = [
         {"id": r.id, "title": r.title, "source": book_source} for r in results
     ]
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                _button_label(r.title),
-                callback_data=f"{BOOK_PREFIX}{i}",
-            ),
-        ]
-        for i, r in enumerate(results)
-    ]
+    
+    keyboard = _build_books_keyboard(context.user_data["books_pending"], 0, settings.books_api_max_results)
     safe_q = html.escape(q)
     await msg.reply_html(
-        f"Resultados para <b>{safe_q}</b>. Pulsa uno:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        f"Resultados para <b>{safe_q}</b>:",
+        reply_markup=keyboard,
     )
+
+
+async def on_book_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message:
+        return
+    await query.answer()
+
+    try:
+        page = int((query.data or "").removeprefix("bpage:"))
+    except ValueError:
+        return
+
+    pending = context.user_data.get("books_pending")
+    if not isinstance(pending, list):
+        try:
+            await query.edit_message_text("Resultados expirados. Busca de nuevo.")
+        except Exception:
+            pass
+        return
+
+    settings = settings_from(context)
+    keyboard = _build_books_keyboard(pending, page, settings.books_api_max_results)
+
+    try:
+        await query.edit_message_reply_markup(reply_markup=keyboard)
+    except Exception:
+        pass
 
 
 async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -316,6 +364,7 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 def register(application: Application) -> None:
+    application.add_handler(CallbackQueryHandler(on_book_page, pattern=r"^bpage:\d+$"))
     application.add_handler(CallbackQueryHandler(on_book_pick, pattern=r"^book:\d+$"))
     application.add_handler(CommandHandler("fuente", cmd_fuente))
     application.add_handler(CommandHandler("libro", cmd_libro))
