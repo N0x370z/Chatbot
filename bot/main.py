@@ -12,7 +12,7 @@ if str(_ROOT) not in sys.path:
 
 import aiohttp
 from telegram import Update
-from telegram.ext import Application, ContextTypes, TypeHandler
+from telegram.ext import Application, ApplicationHandlerStop, ContextTypes, TypeHandler
 
 from bot.config import Settings, get_settings
 from bot.db import Database
@@ -63,6 +63,16 @@ async def on_any_update(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             chat.id if chat else None,
             message.text if message else None,
         )
+        if user:
+            from bot.deps import db_from
+            db = db_from(context)
+            await db.add_user(user.id)
+            if await db.is_banned(user.id):
+                logger.info("Ignorando update de usuario baneado: %s", user.id)
+                raise ApplicationHandlerStop()
+
+    except ApplicationHandlerStop:
+        raise
     except Exception:
         logger.exception("Error inesperado en on_any_update")
         raise
