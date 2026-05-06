@@ -41,6 +41,7 @@ class Settings:
     incoming_files_path: Path
     max_upload_size_mb: int
     calibre_library_path: Path | None
+    ssl_verify: bool
 
     @property
     def max_file_size_bytes(self) -> int:
@@ -111,6 +112,9 @@ def get_settings() -> Settings:
         maybe_path = Path(calibre_str).expanduser().resolve()
         if maybe_path.exists():
             calibre_library_path = maybe_path
+            
+    ssl_verify_raw = os.environ.get("SSL_VERIFY", "true").strip().lower()
+    ssl_verify = ssl_verify_raw not in ("0", "false", "f", "no", "n")
 
     if books_api_base_url and not books_api_base_url.startswith(("http://", "https://")):
         msg = "BOOKS_API_BASE_URL debe empezar por http:// o https://"
@@ -134,4 +138,5 @@ def get_settings() -> Settings:
         incoming_files_path=incoming_files_path,
         max_upload_size_mb=max_upload_size_mb,
         calibre_library_path=calibre_library_path,
+        ssl_verify=ssl_verify,
     )

@@ -30,6 +30,19 @@ def _safe_name(name: str | None, fallback: str) -> str:
     return Path(original).name
 
 
+def _verify_file_integrity(path: Path, extension: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            header = f.read(4)
+        if extension == ".pdf":
+            return header.startswith(b"%PDF")
+        if extension == ".epub":
+            return header.startswith(b"PK\x03\x04")
+    except OSError:
+        return False
+    return True
+
+
 async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     document = message.document if message else None
@@ -68,6 +81,13 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     target = settings.incoming_files_path / f"{ts}_{safe_name}"
     tg_file = await document.get_file()
     await tg_file.download_to_drive(custom_path=str(target))
+    
+    if not _verify_file_integrity(target, extension):
+        target.unlink(missing_ok=True)
+        logger.warning("Integridad de archivo fallida: user_id=%s file=%s", user.id if user else "unknown", target)
+        await message.reply_text("El archivo subido está corrupto o no tiene el formato correcto (no es un PDF ni EPUB válido).")
+        return
+
     await message.reply_text(f"Archivo recibido y guardado: {target}")
     context.user_data["last_uploaded_file"] = str(target)
     logger.info(

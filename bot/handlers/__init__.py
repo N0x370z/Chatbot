@@ -51,20 +51,17 @@ async def cmd_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         
     queue = queue_from(context)
     jobs = queue.jobs_for_user(user.id)
-    # Find most recent queued job
     queued_jobs = [j for j in jobs if j.status == "queued"]
     if not queued_jobs:
         await update.effective_message.reply_text("No tienes descargas pendientes en cola.")
         return
-        
-    # Most recent is the last one in the list (jobs_for_user returns in order added)
-    latest_job = queued_jobs[0]  # wait, jobs_for_user returns reverse sorted by created_at!
-    
-    # Just mark as failed, worker will skip it or it will just be noted as failed
+
+    # jobs_for_user returns sorted by created_at DESC → index 0 = most recent
+    latest_job = queued_jobs[0]
     latest_job.status = "failed"
     latest_job.error = "Cancelado por el usuario"
-    
-    await update.effective_message.reply_text(f"Se ha cancelado la descarga #{latest_job.id}.")
+
+    await update.effective_message.reply_text(f"Descarga #{latest_job.id} cancelada.")
 
 
 def register_handlers(application: Application, admin_user_id: int) -> None:

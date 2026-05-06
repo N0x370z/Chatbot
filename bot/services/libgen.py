@@ -83,7 +83,7 @@ async def search_libgen(query: str, max_results: int) -> list[BookResult]:
     }
 
     timeout = aiohttp.ClientTimeout(total=20, connect=8)
-    connector = aiohttp.TCPConnector(ssl=False)
+    connector = aiohttp.TCPConnector(ssl=settings.ssl_verify if settings else False)
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         for host in LIBGEN_HOSTS:
             path = "/index.php" if "libgen.li" in host else LIBGEN_SEARCH_PATH
@@ -176,7 +176,7 @@ async def download_libgen(
         # Paso 2: hacer GET a la página intermedia y extraer link real
         try:
             # Usar SSL bypass para intermediate pages si es libgen.li
-            connector = aiohttp.TCPConnector(ssl=False) if "libgen.li" in book_id else None
+            connector = aiohttp.TCPConnector(ssl=settings.ssl_verify) if "libgen.li" in book_id else None
             async with aiohttp.ClientSession(connector=connector) as tmp_session:
                 async with tmp_session.get(book_id, timeout=timeout_page) as resp:
                     resp.raise_for_status()
@@ -215,7 +215,7 @@ async def download_libgen(
         raise BooksApiError(f"El dominio de descarga no está permitido: {parsed_download_url.netloc}")
 
     try:
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector(ssl=settings.ssl_verify)
         async with aiohttp.ClientSession(connector=connector) as tmp_session:
             async with tmp_session.get(download_url, timeout=timeout_file) as resp:
                 resp.raise_for_status()
