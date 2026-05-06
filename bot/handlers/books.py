@@ -15,18 +15,22 @@ from bot.handlers import menu
 from bot.services.books_api import BookResult, BooksApiError, download_book_bytes, search_books
 from bot.services.dbooks import download_dbooks, search_dbooks
 from bot.services.gutenberg import download_gutenberg, search_gutenberg
+from bot.services.internet_archive import download_internet_archive, search_internet_archive
 from bot.services.libgen import download_libgen, search_libgen
 from bot.services.open_library import search_open_library
+from bot.services.standard_ebooks import download_standard_ebooks, search_standard_ebooks
 
 logger = logging.getLogger(__name__)
 
 BOOK_PREFIX = "book:"
-BOOK_SOURCES = ("gutenberg", "libgen", "open_library", "dbooks")
+BOOK_SOURCES = ("gutenberg", "libgen", "open_library", "dbooks", "internet_archive", "standard_ebooks")
 SOURCE_LABELS = {
     "gutenberg": "Gutenberg",
     "libgen": "Libgen",
     "open_library": "Open Library",
     "dbooks": "DBooks",
+    "internet_archive": "Internet Archive",
+    "standard_ebooks": "Standard Ebooks",
 }
 
 
@@ -45,16 +49,19 @@ async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not args:
         current = context.user_data.get("book_source", "open_library")
         label = SOURCE_LABELS.get(current, current)
+        sources_list = ", ".join(BOOK_SOURCES)
         await msg.reply_text(
-            "Selecciona la fuente de libros con /fuente <opción>. Opciones: gutenberg, libgen, open_library, dbooks.\n"
+            f"Selecciona la fuente de libros con /fuente <opción>.\n"
+            f"Opciones: {sources_list}\n"
             f"Fuente actual: {label}"
         )
         return
 
     choice = args[0].strip().lower()
     if choice not in BOOK_SOURCES:
+        sources_list = ", ".join(BOOK_SOURCES)
         await msg.reply_text(
-            "Fuente no válida. Usa /fuente gutenberg, /fuente libgen, /fuente open_library o /fuente dbooks."
+            f"Fuente no válida. Usa /fuente con una de: {sources_list}"
         )
         return
 
@@ -105,12 +112,19 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         from bot.utils.converter import ConversionError, convert_book
-        
+
         if last_path.suffix.lower() == f".{output_format}":
-            await msg.reply_text(f"El archivo ya está en formato {output_format.upper()}. No es necesario convertirlo.")
+            await msg.reply_text(
+                f"El archivo ya está en formato {output_format.upper()}. "
+                "No es necesario convertirlo."
+            )
             return
-            
+
+        status_msg = await msg.reply_text(
+            f"⏳ Convirtiendo a {output_format.upper()}, esto puede tardar unos segundos..."
+        )
         output_path = await convert_book(last_path, output_format)
+
         with output_path.open("rb") as f:
             await msg.reply_document(
                 document=InputFile(f, filename=output_path.name),
@@ -118,6 +132,7 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 write_timeout=600,
                 connect_timeout=60,
             )
+        await status_msg.delete()
         stats_from(context).mark_download(ok=True)
         try:
             output_path.unlink(missing_ok=True)
@@ -129,6 +144,7 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if isinstance(exc, ConversionError):
             await msg.reply_text(f"Error de conversión: {exc}")
         else:
+            logger.exception("convertir: error inesperado")
             await msg.reply_text("Error al enviar el archivo convertido.")
 
 
@@ -186,6 +202,10 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 results = await search_open_library(session, q, settings.books_api_max_results)
             elif book_source == "dbooks":
                 results = await search_dbooks(session, q, settings.books_api_max_results)
+            elif book_source == "internet_archive":
+                results = await search_internet_archive(session, q, settings.books_api_max_results)
+            elif book_source == "standard_ebooks":
+                results = await search_standard_ebooks(session, q, settings.books_api_max_results)
             else:
                 results = await search_books(session, settings, q)
                 book_source = "api"
@@ -267,6 +287,10 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             data, filename = await download_libgen(session, book_id, settings)
         elif source == "dbooks":
             data, filename = await download_dbooks(session, book_id, settings)
+        elif source == "internet_archive":
+            data, filename = await download_internet_archive(session, book_id, settings)
+        elif source == "standard_ebooks":
+            data, filename = await download_standard_ebooks(session, book_id, settings)
         else:
             data, filename = await download_book_bytes(session, settings, book_id)
 
