@@ -10,7 +10,7 @@ from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
-from bot.deps import http_session_from, limiter_from, settings_from, stats_from
+from bot.deps import db_from, http_session_from, limiter_from, settings_from, stats_from
 from bot.handlers import menu
 from bot.services.books_api import BookResult, BooksApiError, download_book_bytes, search_books
 from bot.services.dbooks import download_dbooks, search_dbooks
@@ -209,7 +209,7 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             book_source = "open_library"
 
     import time
-    cache = context.user_data.setdefault("book_cache", {})
+    cache = context.application.bot_data.setdefault("book_search_cache", {})
     cache_key = f"{book_source}:{q}"
     now = time.time()
     
@@ -323,6 +323,26 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context.user_data.pop("books_pending", None)
         return
 
+    db = db_from(context)
+    file_cache_key = f"book:{source}:{book_id}"
+
+    # Try fast path via file_id
+    cached_file_id = await db.get_file_id(file_cache_key)
+    if cached_file_id:
+        try:
+            await query.edit_message_text("Enviando desde caché instantánea...")
+            await query.message.reply_document(
+                document=cached_file_id,
+                read_timeout=60,
+                write_timeout=60,
+            )
+            stats.mark_download(ok=True)
+            context.user_data.pop("books_pending", None)
+            return
+        except Exception as e:
+            logger.warning("Caché hit falló para %s: %s", file_cache_key, e)
+            # fallback to normal download if Telegram rejected the file_id
+
     try:
         await query.edit_message_text("Descargando libro…")
     except Exception:
@@ -344,12 +364,14 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         buf = io.BytesIO(data)
         buf.seek(0)
-        await query.message.reply_document(
+        msg_out = await query.message.reply_document(
             document=InputFile(buf, filename=filename),
             read_timeout=600,
             write_timeout=600,
             connect_timeout=60,
         )
+        if msg_out and msg_out.document:
+            await db.set_file_id(file_cache_key, msg_out.document.file_id)
         stats.mark_download(ok=True)
     except BooksApiError as e:
         stats.mark_download(ok=False)

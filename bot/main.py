@@ -15,6 +15,7 @@ from telegram import Update
 from telegram.ext import Application, ContextTypes, TypeHandler
 
 from bot.config import Settings, get_settings
+from bot.db import Database
 from bot.download_queue import DownloadQueue
 from bot.handlers import register_handlers
 from bot.state import BotStats, RateLimiter
@@ -90,6 +91,9 @@ def main() -> None:
         settings=settings,
         stats=stats,
     )
+    
+    db_path = settings.download_path / "bot.sqlite"
+    application.bot_data["db"] = Database(db_path)
 
     register_handlers(application, admin_user_id=settings.admin_user_id)
     application.add_handler(TypeHandler(object, on_any_update), group=-1)

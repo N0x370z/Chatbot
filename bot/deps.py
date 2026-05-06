@@ -6,6 +6,7 @@ import aiohttp
 from telegram.ext import ContextTypes
 
 from bot.config import Settings
+from bot.db import Database
 from bot.download_queue import DownloadQueue
 from bot.state import BotStats, RateLimiter
 
@@ -48,3 +49,11 @@ def http_session_from(context: ContextTypes.DEFAULT_TYPE) -> aiohttp.ClientSessi
         msg = "http_session no está disponible. Revisa post_init en bot/main.py."
         raise RuntimeError(msg)
     return session
+
+
+def db_from(context: ContextTypes.DEFAULT_TYPE) -> Database:
+    db = context.application.bot_data.get("db")
+    if db is None:
+        msg = "bot_data['db'] no está inicializado. Revisa bot/main.py."
+        raise RuntimeError(msg)
+    return db
