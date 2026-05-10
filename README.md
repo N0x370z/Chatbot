@@ -46,6 +46,8 @@ Además, incluye un worker en segundo plano que monitoriza la carpeta de entrada
 - Límite configurable de tamaño de archivo
 - Registro de actividad (logs) por usuario
 - Modo administrador con estadísticas de uso
+- **NUEVO:** Soporte para descarga de Listas de Reproducción (Playlists)
+- **NUEVO:** Incrustación automática de carátulas y metadatos en archivos multimedia
 
 ---
 
@@ -193,6 +195,28 @@ O con Docker:
 docker build -t telegram-media-bot .
 docker run --env-file .env telegram-media-bot
 ```
+
+### ☁️ Despliegue en Fly.io (Recomendado)
+
+El proyecto incluye un archivo `fly.toml` listo para ser usado. Fly.io permite ejecutar tanto el bot como el worker en la misma instancia usando procesos separados y volúmenes persistentes.
+
+1. Instala [flyctl](https://fly.io/docs/hands-on/install-cli/) e inicia sesión.
+2. Lanza la aplicación (sin desplegar inmediatamente):
+   ```bash
+   fly launch --no-deploy
+   ```
+3. Crea un volumen persistente para la base de datos SQLite (1GB es suficiente):
+   ```bash
+   fly volume create bot_data --region iad --size 1
+   ```
+4. Configura las variables secretas necesarias:
+   ```bash
+   fly secrets set TELEGRAM_BOT_TOKEN="tu_token" ADMIN_USER_ID="tu_id"
+   ```
+5. Despliega la aplicación:
+   ```bash
+   fly deploy
+   ```
 
 ---
 
@@ -358,7 +382,7 @@ git commit -m "fix: eliminar archivo sensible del repositorio"
 - [x] Sistema de colas para múltiples usuarios
 - [x] Panel de administración con estadísticas
 - [x] Dockerización del bot
-- [ ] Despliegue en servidor VPS / Railway / Fly.io
+- [x] Despliegue en servidor VPS / Railway / Fly.io
 
 ---
 

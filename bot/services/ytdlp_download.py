@@ -120,7 +120,12 @@ def download_best_audio(url: str, settings: Settings, bot=None, chat_id=None, me
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "writethumbnail": True,
         "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
+        "postprocessors": [
+            {"key": "FFmpegMetadata"},
+            {"key": "EmbedThumbnail"},
+        ],
     }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -143,12 +148,15 @@ def download_apple_m4a(url: str, settings: Settings, bot=None, chat_id=None, mes
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "writethumbnail": True,
         "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "m4a",
             },
+            {"key": "FFmpegMetadata"},
+            {"key": "EmbedThumbnail"},
         ],
     }
     try:
@@ -173,7 +181,7 @@ def download_best_video(url: str, settings: Settings, bot=None, chat_id=None, me
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "writethumbnail": False,
+        "writethumbnail": True,
         "writeinfojson": False,
         "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
         "extractor_args": {
@@ -182,9 +190,8 @@ def download_best_video(url: str, settings: Settings, bot=None, chat_id=None, me
             },
         },
         "postprocessors": [
-            {
-                "key": "FFmpegMetadataPP",
-            },
+            {"key": "FFmpegMetadata"},
+            {"key": "EmbedThumbnail"},
             {
                 "key": "FFmpegVideoRemuxer",
                 "preferedformat": "mp4",
@@ -214,7 +221,7 @@ def download_audio_format(url: str, settings: Settings, fmt: str, bot=None, chat
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "writethumbnail": False,
+        "writethumbnail": True,
         "writeinfojson": False,
         "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
         "postprocessors": [
@@ -222,6 +229,8 @@ def download_audio_format(url: str, settings: Settings, fmt: str, bot=None, chat
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": fmt,
             },
+            {"key": "FFmpegMetadata"},
+            {"key": "EmbedThumbnail"},
         ],
     }
     try:
@@ -242,3 +251,24 @@ def cleanup_download(path: Path) -> None:
         shutil.rmtree(path.parent, ignore_errors=True)
     except OSError:
         pass
+
+
+def extract_playlist(url: str) -> list[str]:
+    """Extrae las URLs de una lista de reproducción usando yt-dlp."""
+    opts = {
+        "extract_flat": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return []
+            if "entries" in info:
+                return [e.get("url") for e in info["entries"] if e.get("url")]
+            else:
+                return [url]
+    except Exception:
+        return [url]
+
