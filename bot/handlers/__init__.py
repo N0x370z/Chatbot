@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from bot.deps import queue_from, stats_from
-from bot.handlers import admin, audio, books, menu, uploads, video, estado
+from bot.handlers import admin, audio, books, menu, uploads, video, estado, url_detect
 from bot.texts import HELP_HTML
 
 
@@ -75,4 +75,5 @@ def register_handlers(application: Application, admin_user_id: int) -> None:
     video.register(application)
     uploads.register(application)
     estado.register(application)
+    url_detect.register(application)
     admin.register(application, admin_user_id=admin_user_id)

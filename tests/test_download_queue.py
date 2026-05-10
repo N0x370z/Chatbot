@@ -161,3 +161,96 @@ def test_jobs_for_user_returns_only_own_jobs(tmp_path: Path):
     result = q.jobs_for_user(10)
     assert len(result) == 1
     assert result[0].id == "a"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Retry logic
+# ──────────────────────────────────────────────────────────────────────────────
+
+from unittest.mock import AsyncMock, patch
+from yt_dlp.utils import DownloadError
+from bot.services.ytdlp_download import DownloadTooLargeError
+
+
+def test_run_job_retries_on_download_error(tmp_path: Path):
+    """DownloadError se reintenta; si el 2º intento tiene éxito, job=done."""
+    stats = BotStats()
+    settings = _make_settings(tmp_path)
+    q = DownloadQueue(settings=settings, stats=stats)
+
+    job = DownloadJob(id="retry1", kind="audio", url="https://fail.then.ok/v", chat_id=1, user_id=1)
+
+    call_count = 0
+
+    async def fake_do_download(application, j, db, cache_key):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise DownloadError("network blip")
+        # 2nd attempt succeeds (no-op)
+
+    bot = AsyncMock()
+    application = MagicMock()
+    application.bot = bot
+    application.bot_data = {}
+
+    with patch.object(q, "_do_download", side_effect=fake_do_download), \
+         patch("asyncio.sleep", new_callable=AsyncMock):
+        asyncio.run(q._run_job(application, job))
+
+    assert job.status == "done"
+    assert call_count == 2
+    assert job.retry_count == 1
+
+
+def test_run_job_fails_after_max_retries(tmp_path: Path):
+    """Si todos los reintentos fallan, job=failed y se notifica al usuario."""
+    stats = BotStats()
+    q = DownloadQueue(settings=_make_settings(tmp_path), stats=stats)
+
+    job = DownloadJob(id="retry2", kind="audio", url="https://always.fail/v", chat_id=99, user_id=1)
+
+    async def always_fail(application, j, db, cache_key):
+        raise DownloadError("persistent error")
+
+    bot = AsyncMock()
+    application = MagicMock()
+    application.bot = bot
+    application.bot_data = {}
+
+    with patch.object(q, "_do_download", side_effect=always_fail), \
+         patch("asyncio.sleep", new_callable=AsyncMock):
+        asyncio.run(q._run_job(application, job))
+
+    assert job.status == "failed"
+    assert "persistent error" in (job.error or "")
+    # bot notified user once
+    bot.send_message.assert_called_once()
+
+
+def test_run_job_no_retry_on_too_large(tmp_path: Path):
+    """DownloadTooLargeError NO reintenta — falla inmediatamente."""
+    stats = BotStats()
+    q = DownloadQueue(settings=_make_settings(tmp_path), stats=stats)
+
+    job = DownloadJob(id="noretr", kind="audio", url="https://big.file/v", chat_id=5, user_id=1)
+
+    call_count = 0
+
+    async def too_large(application, j, db, cache_key):
+        nonlocal call_count
+        call_count += 1
+        from pathlib import Path as _Path
+        raise DownloadTooLargeError(_Path("/tmp/fake.mp3"), 999_999_999, 1)
+
+    bot = AsyncMock()
+    application = MagicMock()
+    application.bot = bot
+    application.bot_data = {}
+
+    with patch.object(q, "_do_download", side_effect=too_large), \
+         patch("asyncio.sleep", new_callable=AsyncMock):
+        asyncio.run(q._run_job(application, job))
+
+    assert job.status == "failed"
+    assert call_count == 1   # solo 1 intento
