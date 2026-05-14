@@ -1,9 +1,10 @@
 """Tests para bot/handlers/url_detect.py."""
+from __future__ import annotations
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-from telegram import Update
+from telegram import Message, Update
 
 from bot.handlers.url_detect import (
     _extract_url,
@@ -17,7 +18,7 @@ from bot.state import BotStats, RateLimiter
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _make_context(text_url: str | None = None) -> MagicMock:
+def _make_context() -> MagicMock:
     ctx = MagicMock()
     ctx.user_data = {}
     stats = BotStats()
@@ -145,7 +146,7 @@ def test_on_url_action_audio():
 
     query = AsyncMock()
     query.data = f"{URL_ACTION_PREFIX}audio"
-    query.message = MagicMock()
+    query.message = MagicMock(spec=Message)
     query.message.chat_id = 1000
     update.callback_query = query
 
@@ -164,7 +165,7 @@ def test_on_url_action_video():
 
     query = AsyncMock()
     query.data = f"{URL_ACTION_PREFIX}video"
-    query.message = MagicMock()
+    query.message = MagicMock(spec=Message)
     query.message.chat_id = 1000
     update.callback_query = query
 
@@ -181,7 +182,7 @@ def test_on_url_action_expired_url():
 
     query = AsyncMock()
     query.data = f"{URL_ACTION_PREFIX}video"
-    query.message = MagicMock()
+    query.message = MagicMock(spec=Message)
     update.callback_query = query
 
     asyncio.run(on_url_action(update, ctx))

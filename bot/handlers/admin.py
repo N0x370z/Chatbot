@@ -22,10 +22,11 @@ def register(application: Application, *, admin_user_id: int) -> None:
         settings = settings_from(context)
         stats = stats_from(context)
         user = update.effective_user
-        if admin_user_id == 0 or user is None or user.id != admin_user_id:
-            await update.effective_message.reply_text(
-                "No tienes permiso para este comando."
-            )
+        if not update.effective_message or admin_user_id == 0 or user is None or user.id != admin_user_id:
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    "No tienes permiso para este comando."
+                )
             return
         stats.mark_command("stats", user.id)
 
@@ -43,7 +44,7 @@ def register(application: Application, *, admin_user_id: int) -> None:
 
     async def cmd_ban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
-        if admin_user_id == 0 or user is None or user.id != admin_user_id:
+        if not update.effective_message or admin_user_id == 0 or user is None or user.id != admin_user_id:
             return
         
         args = context.args
@@ -57,7 +58,7 @@ def register(application: Application, *, admin_user_id: int) -> None:
 
     async def cmd_unban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
-        if admin_user_id == 0 or user is None or user.id != admin_user_id:
+        if not update.effective_message or admin_user_id == 0 or user is None or user.id != admin_user_id:
             return
         
         args = context.args
@@ -71,7 +72,7 @@ def register(application: Application, *, admin_user_id: int) -> None:
 
     async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
-        if admin_user_id == 0 or user is None or user.id != admin_user_id:
+        if not update.effective_message or admin_user_id == 0 or user is None or user.id != admin_user_id:
             return
             
         msg_text = " ".join(context.args)
