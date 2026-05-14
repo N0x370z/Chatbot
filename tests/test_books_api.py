@@ -97,6 +97,7 @@ def _dummy_settings(books_api_base_url="http://api.example.com", max_file_size_m
     return Settings(
         telegram_bot_token="123",
         admin_user_id=1,
+        allowed_user_ids=frozenset(),
         max_file_size_mb=max_file_size_mb,
         download_path=Path("/tmp"),
         log_level="INFO",
@@ -104,6 +105,8 @@ def _dummy_settings(books_api_base_url="http://api.example.com", max_file_size_m
         rate_limit_max_requests=10,
         books_api_base_url=books_api_base_url,
         books_api_key="",
+        books_api_key_header="Authorization",
+        books_api_key_prefix="Bearer",
         books_api_search_path="/search",
         books_api_download_path_template="/download/{id}",
         books_api_query_param="q",

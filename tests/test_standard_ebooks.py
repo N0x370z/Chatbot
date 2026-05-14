@@ -141,9 +141,9 @@ def test_search_standard_ebooks_client_error():
 
 def test_download_standard_ebooks_success():
     url = "https://standardebooks.org/ebooks/standard.epub"
-    session = DummySession([DummyResponse(b"epub_content")])
+    session = DummySession([DummyResponse(b"PK\x03\x04content")])
     data, fname = asyncio.run(download_standard_ebooks(session, url, MockSettings()))
-    assert data == b"epub_content"
+    assert data == b"PK\x03\x04content"
     assert fname == "standard.epub"
 
 

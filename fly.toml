@@ -1,0 +1,22 @@
+app = "telegram-media-bot"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # NOTA: Las variables secretas se deben configurar con:
+  # fly secrets set TELEGRAM_BOT_TOKEN="tu_token" ADMIN_USER_ID="1234"
+  DOWNLOAD_PATH = "/data/downloads"
+  INCOMING_FILES_PATH = "/data/incoming"
+  PROCESSED_FILES_PATH = "/data/processed"
+  LOG_LEVEL = "INFO"
+
+[mounts]
+  source = "bot_data"
+  destination = "/data"
+  initial_size = "1GB"
+
+[processes]
+  bot = "python main.py"
+  worker = "python main_worker.py"

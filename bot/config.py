@@ -26,6 +26,7 @@ def _ensure_writable_dir(path_value: str, fallback_value: str) -> Path:
 class Settings:
     telegram_bot_token: str
     admin_user_id: int
+    allowed_user_ids: frozenset[int]  # empty = no restriction
     max_file_size_mb: int
     download_path: Path
     log_level: str
@@ -33,6 +34,8 @@ class Settings:
     rate_limit_max_requests: int
     books_api_base_url: str
     books_api_key: str
+    books_api_key_header: str
+    books_api_key_prefix: str
     books_api_search_path: str
     books_api_download_path_template: str
     books_api_query_param: str
@@ -98,6 +101,17 @@ def get_settings() -> Settings:
     books_api_max_results = int(b_max_raw) if b_max_raw else 8
     books_api_max_results = max(1, min(books_api_max_results, 10))
 
+    # Allow-list
+    allowed_raw = os.environ.get("ALLOWED_USER_IDS", "").strip()
+    allowed_user_ids: frozenset[int] = frozenset(
+        int(uid) for uid in allowed_raw.split(",") if uid.strip().lstrip("-").isdigit()
+    ) if allowed_raw else frozenset()
+
+    books_api_key_header = (
+        os.environ.get("BOOKS_API_KEY_HEADER", "Authorization").strip() or "Authorization"
+    )
+    books_api_key_prefix = os.environ.get("BOOKS_API_KEY_PREFIX", "Bearer").strip()
+
     incoming_str = (
         os.environ.get("INCOMING_FILES_PATH", "/data/incoming").strip()
         or "/data/incoming"
@@ -123,6 +137,7 @@ def get_settings() -> Settings:
     return Settings(
         telegram_bot_token=token,
         admin_user_id=admin_user_id,
+        allowed_user_ids=allowed_user_ids,
         max_file_size_mb=max_file_size_mb,
         download_path=download_path,
         log_level=log_level,
@@ -130,6 +145,8 @@ def get_settings() -> Settings:
         rate_limit_max_requests=rate_limit_max_requests,
         books_api_base_url=books_api_base_url,
         books_api_key=books_api_key,
+        books_api_key_header=books_api_key_header,
+        books_api_key_prefix=books_api_key_prefix,
         books_api_search_path=books_api_search_path,
         books_api_download_path_template=books_api_download_path_template,
         books_api_query_param=books_api_query_param,

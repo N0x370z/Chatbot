@@ -12,6 +12,7 @@ from urllib.parse import urlencode, urljoin, urlparse
 import aiohttp
 
 from bot.services.books_api import BookResult, BooksApiError
+from bot.services._book_validation import validate_book_bytes
 
 logger = logging.getLogger(__name__)
 LIBGEN_HOSTS = (
@@ -73,7 +74,12 @@ def _ext_from_content_type(ctype: str) -> str | None:
     return mapping.get(ctype)
 
 
-async def search_libgen(query: str, max_results: int) -> list[BookResult]:
+async def search_libgen(
+    session: aiohttp.ClientSession,
+    query: str,
+    max_results: int,
+    settings=None,
+) -> list[BookResult]:
     params = {
         "req": query,
         "column": "title",
@@ -83,28 +89,26 @@ async def search_libgen(query: str, max_results: int) -> list[BookResult]:
     }
 
     timeout = aiohttp.ClientTimeout(total=20, connect=8)
-    connector = aiohttp.TCPConnector(ssl=settings.ssl_verify if settings else False)
-    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-        for host in LIBGEN_HOSTS:
-            path = "/index.php" if "libgen.li" in host else LIBGEN_SEARCH_PATH
-            try:
-                async with session.get(
-                    f"{host}{path}",
-                    params=params,
-                    timeout=timeout,
-                ) as resp:
-                    resp.raise_for_status()
-                    payload = await resp.text()
-            except asyncio.TimeoutError:
-                logger.warning("libgen timeout host=%s, probando siguiente", host)
-                continue
-            except aiohttp.ClientError as e:
-                logger.warning("libgen error host=%s: %s", host, e)
-                continue
+    for host in LIBGEN_HOSTS:
+        path = "/index.php" if "libgen.li" in host else LIBGEN_SEARCH_PATH
+        try:
+            async with session.get(
+                f"{host}{path}",
+                params=params,
+                timeout=timeout,
+            ) as resp:
+                resp.raise_for_status()
+                payload = await resp.text()
+        except asyncio.TimeoutError:
+            logger.warning("libgen timeout host=%s, probando siguiente", host)
+            continue
+        except aiohttp.ClientError as e:
+            logger.warning("libgen error host=%s: %s", host, e)
+            continue
 
-            results = _parse_libgen_search_html(payload, host, max_results)
-            if results:
-                return results
+        results = _parse_libgen_search_html(payload, host, max_results)
+        if results:
+            return results
 
     return []
 
@@ -211,7 +215,10 @@ async def download_libgen(
     allowed_domains = ["libgen.li", "libgen.is", "libgen.rs", "libgen.st"]
     parsed_download_url = urlparse(download_url)
     
-    if not any(d in parsed_download_url.netloc for d in allowed_domains):
+    if not any(
+        parsed_download_url.netloc == d or parsed_download_url.netloc.endswith("." + d)
+        for d in allowed_domains
+    ):
         raise BooksApiError(f"El dominio de descarga no está permitido: {parsed_download_url.netloc}")
 
     try:
@@ -233,6 +240,8 @@ async def download_libgen(
 
     if len(data) > limit:
         raise BooksApiError("El archivo descargado supera MAX_FILE_SIZE_MB.")
+
+    validate_book_bytes(data)
 
     # Detectar extensión real por magic bytes
     ext = _detect_ext_by_magic(data) or _ext_from_content_type(ctype) or "bin"

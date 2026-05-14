@@ -53,12 +53,12 @@ async def reply_with_video_or_document(message: Message, path: Path) -> None:
             )
 
 
-async def send_audio_or_document(bot: Bot, *, chat_id: int, path: Path) -> None:
+async def send_audio_or_document(bot: Bot, *, chat_id: int, path: Path) -> Message:
     ext = path.suffix.lower()
     title = path.stem[:80]
     with path.open("rb") as f:
         if ext in _AUDIO_EXT:
-            await bot.send_audio(
+            return await bot.send_audio(
                 chat_id=chat_id,
                 audio=f,
                 title=title,
@@ -67,7 +67,7 @@ async def send_audio_or_document(bot: Bot, *, chat_id: int, path: Path) -> None:
                 connect_timeout=60,
             )
         else:
-            await bot.send_document(
+            return await bot.send_document(
                 chat_id=chat_id,
                 document=InputFile(f, filename=path.name),
                 read_timeout=_TIMEOUT,
@@ -76,11 +76,11 @@ async def send_audio_or_document(bot: Bot, *, chat_id: int, path: Path) -> None:
             )
 
 
-async def send_video_or_document(bot: Bot, *, chat_id: int, path: Path) -> None:
+async def send_video_or_document(bot: Bot, *, chat_id: int, path: Path) -> Message:
     ext = path.suffix.lower()
     with path.open("rb") as f:
         if ext in _VIDEO_EXT:
-            await bot.send_video(
+            return await bot.send_video(
                 chat_id=chat_id,
                 video=f,
                 supports_streaming=True,
@@ -89,7 +89,7 @@ async def send_video_or_document(bot: Bot, *, chat_id: int, path: Path) -> None:
                 connect_timeout=60,
             )
         else:
-            await bot.send_document(
+            return await bot.send_document(
                 chat_id=chat_id,
                 document=InputFile(f, filename=path.name),
                 read_timeout=_TIMEOUT,

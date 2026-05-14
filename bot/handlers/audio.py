@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
+import asyncio
 
 from bot.deps import limiter_from, queue_from, stats_from
+from bot.services.ytdlp_download import extract_playlist
 from bot.utils.url_args import url_from_message_args
 
 AUDIO_FMT_PREFIX = "afmt:"
@@ -14,6 +16,8 @@ VALID_AUDIO_FMTS = {"mp3": "MP3", "m4a": "M4A (Apple)", "opus": "OPUS", "flac": 
 
 async def cmd_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    if not update.effective_message or not update.effective_chat or context.user_data is None:
+        return
     stats = stats_from(context)
     stats.mark_command("audio", user.id if user else None)
     url = url_from_message_args(context)
@@ -36,21 +40,37 @@ async def cmd_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
     fmt = context.user_data.get("audio_format", "mp3")
-    job = await queue_from(context).enqueue(
-        context.application,
-        kind="audio",
-        url=url,
-        chat_id=update.effective_chat.id,
-        user_id=user_id,
-        audio_format=fmt,
-    )
-    await update.effective_message.reply_text(
-        f"Trabajo en cola: #{job.id} (audio/{fmt.upper()}). Usa /jobs para ver estado."
-    )
+    
+    msg = await update.effective_message.reply_text("🔎 Analizando enlace...")
+    urls = await asyncio.to_thread(extract_playlist, url)
+    if not urls:
+        await msg.edit_text("❌ No se encontró contenido en el enlace.")
+        return
+        
+    urls = urls[:50]
+    queue = queue_from(context)
+    jobs = []
+    for u in urls:
+        job = await queue.enqueue(
+            context.application,
+            kind="audio",
+            url=u,
+            chat_id=update.effective_chat.id,
+            user_id=user_id,
+            audio_format=fmt,
+        )
+        jobs.append(job)
+        
+    if len(jobs) == 1:
+        await msg.edit_text(f"Trabajo en cola: #{jobs[0].id} (audio/{fmt.upper()}). Usa /jobs para ver estado.")
+    else:
+        await msg.edit_text(f"🎵 Playlist detectada. Añadidos {len(jobs)} trabajos a la cola (audio/{fmt.upper()}). Usa /jobs para ver estado.")
 
 
 async def cmd_apple(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    if not update.effective_message or not update.effective_chat:
+        return
     stats = stats_from(context)
     stats.mark_command("apple", user.id if user else None)
     url = url_from_message_args(context)
@@ -70,19 +90,34 @@ async def cmd_apple(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "Demasiadas solicitudes seguidas. Espera un minuto e inténtalo de nuevo."
         )
         return
-    job = await queue_from(context).enqueue(
-        context.application,
-        kind="apple",
-        url=url,
-        chat_id=update.effective_chat.id,
-        user_id=user_id,
-    )
-    await update.effective_message.reply_text(
-        f"Trabajo en cola: #{job.id} (apple). Usa /jobs para ver estado."
-    )
+    msg = await update.effective_message.reply_text("🔎 Analizando enlace...")
+    urls = await asyncio.to_thread(extract_playlist, url)
+    if not urls:
+        await msg.edit_text("❌ No se encontró contenido en el enlace.")
+        return
+        
+    urls = urls[:50]
+    queue = queue_from(context)
+    jobs = []
+    for u in urls:
+        job = await queue.enqueue(
+            context.application,
+            kind="apple",
+            url=u,
+            chat_id=update.effective_chat.id,
+            user_id=user_id,
+        )
+        jobs.append(job)
+        
+    if len(jobs) == 1:
+        await msg.edit_text(f"Trabajo en cola: #{jobs[0].id} (apple). Usa /jobs para ver estado.")
+    else:
+        await msg.edit_text(f"🎵 Playlist detectada. Añadidos {len(jobs)} trabajos a la cola (apple). Usa /jobs para ver estado.")
 
 
 async def cmd_formato_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_message or context.user_data is None:
+        return
     current = context.user_data.get("audio_format", "mp3")
     buttons = [
         [
@@ -98,6 +133,8 @@ async def cmd_formato_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def on_audio_fmt_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    if not query or not query.data or context.user_data is None:
+        return
     await query.answer()
     fmt = query.data.removeprefix(AUDIO_FMT_PREFIX)
     if fmt not in VALID_AUDIO_FMTS:

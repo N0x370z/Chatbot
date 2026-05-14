@@ -10,6 +10,7 @@ import aiohttp
 
 from bot.services.books_api import BookResult, BooksApiError
 from bot.services.libgen import _safe_filename
+from bot.services._book_validation import validate_book_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,8 @@ async def download_dbooks(
 
     if len(data) > limit:
         raise BooksApiError("El archivo descargado supera MAX_FILE_SIZE_MB.")
+
+    validate_book_bytes(data)
 
     title = str(payload.get("title", "libro")).strip()
     filename = f"{_safe_filename(title)}.pdf"

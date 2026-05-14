@@ -7,10 +7,10 @@ import io
 import logging
 from pathlib import Path
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
-from bot.deps import http_session_from, limiter_from, settings_from, stats_from
+from bot.deps import db_from, http_session_from, limiter_from, settings_from, stats_from
 from bot.handlers import menu
 from bot.services.books_api import BookResult, BooksApiError, download_book_bytes, search_books
 from bot.services.dbooks import download_dbooks, search_dbooks
@@ -19,6 +19,7 @@ from bot.services.internet_archive import download_internet_archive, search_inte
 from bot.services.libgen import download_libgen, search_libgen
 from bot.services.open_library import search_open_library
 from bot.services.standard_ebooks import download_standard_ebooks, search_standard_ebooks
+from bot.utils.cache import BoundedTTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +40,39 @@ def _button_label(title: str, *, max_len: int = 58) -> str:
     return t if len(t) <= max_len else f"{t[: max_len - 3]}..."
 
 
+def _build_books_keyboard(pending: list[dict], page: int, page_size: int) -> InlineKeyboardMarkup:
+    start = page * page_size
+    end = start + page_size
+    page_items = pending[start:end]
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                _button_label(item["title"]),
+                callback_data=f"{BOOK_PREFIX}{start + i}",
+            )
+        ]
+        for i, item in enumerate(page_items)
+    ]
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"bpage:{page - 1}"))
+    if end < len(pending):
+        nav_row.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"bpage:{page + 1}"))
+    if nav_row:
+        keyboard.append(nav_row)
+
+    return InlineKeyboardMarkup(keyboard)
+
+
 async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    msg = update.effective_message
+    if not msg or context.user_data is None:
+        return
     stats = stats_from(context)
     stats.mark_command("fuente", user.id if user else None)
-
-    msg = update.effective_message
     args = context.args or []
     if not args:
         current = context.user_data.get("book_source", "open_library")
@@ -71,8 +99,10 @@ async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
-    stats_from(context).mark_command("convertir", user.id if user else None)
     msg = update.effective_message
+    if not msg or context.user_data is None:
+        return
+    stats_from(context).mark_command("convertir", user.id if user else None)
     args = context.args or []
 
     if not args:
@@ -150,10 +180,11 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    msg = update.effective_message
+    if not msg or context.user_data is None:
+        return
     stats = stats_from(context)
     stats.mark_command("libro", user.id if user else None)
-
-    msg = update.effective_message
     q = " ".join(context.args).strip() if context.args else ""
     if not q:
         await msg.reply_html(
@@ -182,30 +213,33 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             book_source = "open_library"
 
-    import time
-    cache = context.user_data.setdefault("book_cache", {})
+    cache = context.application.bot_data.get("book_search_cache")
+    if cache is None:
+        cache = BoundedTTLCache(maxsize=100, ttl=300)
+        context.application.bot_data["book_search_cache"] = cache
+
     cache_key = f"{book_source}:{q}"
-    now = time.time()
     
-    cached = cache.get(cache_key)
-    if cached and now - cached.get("timestamp", 0) < 300:
+    cached_results = cache.get(cache_key)
+    if cached_results is not None:
         logger.debug("book cache hit for %s", cache_key)
-        results = cached.get("results", [])
+        results = cached_results
     else:
         logger.debug("book cache miss for %s", cache_key)
         try:
+            fetch_limit = settings.books_api_max_results * 4  # fetch up to 4 pages
             if book_source == "gutenberg":
-                results = await search_gutenberg(session, q, settings.books_api_max_results)
+                results = await search_gutenberg(session, q, fetch_limit)
             elif book_source == "libgen":
-                results = await search_libgen(q, settings.books_api_max_results)
+                results = await search_libgen(session, q, fetch_limit, settings)
             elif book_source == "open_library":
-                results = await search_open_library(session, q, settings.books_api_max_results)
+                results = await search_open_library(session, q, fetch_limit)
             elif book_source == "dbooks":
-                results = await search_dbooks(session, q, settings.books_api_max_results)
+                results = await search_dbooks(session, q, fetch_limit)
             elif book_source == "internet_archive":
-                results = await search_internet_archive(session, q, settings.books_api_max_results)
+                results = await search_internet_archive(session, q, fetch_limit)
             elif book_source == "standard_ebooks":
-                results = await search_standard_ebooks(session, q, settings.books_api_max_results)
+                results = await search_standard_ebooks(session, q, fetch_limit)
             else:
                 results = await search_books(session, settings, q)
                 book_source = "api"
@@ -214,7 +248,7 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await msg.reply_text(str(e))
             return
             
-        cache[cache_key] = {"timestamp": now, "results": results}
+        cache.set(cache_key, results)
 
     if not results:
         await msg.reply_text("No encontré resultados para esa búsqueda.")
@@ -223,25 +257,50 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data["books_pending"] = [
         {"id": r.id, "title": r.title, "source": book_source} for r in results
     ]
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                _button_label(r.title),
-                callback_data=f"{BOOK_PREFIX}{i}",
-            ),
-        ]
-        for i, r in enumerate(results)
-    ]
+    
+    keyboard = _build_books_keyboard(context.user_data["books_pending"], 0, settings.books_api_max_results)
     safe_q = html.escape(q)
     await msg.reply_html(
-        f"Resultados para <b>{safe_q}</b>. Pulsa uno:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        f"Resultados para <b>{safe_q}</b>:",
+        reply_markup=keyboard,
     )
+
+
+async def on_book_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message or context.user_data is None:
+        return
+    if not isinstance(query.message, Message):
+        return
+    await query.answer()
+
+    try:
+        page = int((query.data or "").removeprefix("bpage:"))
+    except ValueError:
+        return
+
+    pending = context.user_data.get("books_pending")
+    if not isinstance(pending, list):
+        try:
+            await query.edit_message_text("Resultados expirados. Busca de nuevo.")
+        except Exception:
+            pass
+        return
+
+    settings = settings_from(context)
+    keyboard = _build_books_keyboard(pending, page, settings.books_api_max_results)
+
+    try:
+        await query.edit_message_reply_markup(reply_markup=keyboard)
+    except Exception:
+        pass
 
 
 async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not query or not query.message:
+    if not query or not query.message or context.user_data is None:
+        return
+    if not isinstance(query.message, Message):
         return
     await query.answer()
 
@@ -275,6 +334,26 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context.user_data.pop("books_pending", None)
         return
 
+    db = db_from(context)
+    file_cache_key = f"book:{source}:{book_id}"
+
+    # Try fast path via file_id
+    cached_file_id = await db.get_file_id(file_cache_key)
+    if cached_file_id:
+        try:
+            await query.edit_message_text("Enviando desde caché instantánea...")
+            await query.message.reply_document(
+                document=cached_file_id,
+                read_timeout=60,
+                write_timeout=60,
+            )
+            stats.mark_download(ok=True)
+            context.user_data.pop("books_pending", None)
+            return
+        except Exception as e:
+            logger.warning("Caché hit falló para %s: %s", file_cache_key, e)
+            # fallback to normal download if Telegram rejected the file_id
+
     try:
         await query.edit_message_text("Descargando libro…")
     except Exception:
@@ -296,12 +375,14 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         buf = io.BytesIO(data)
         buf.seek(0)
-        await query.message.reply_document(
+        msg_out = await query.message.reply_document(
             document=InputFile(buf, filename=filename),
             read_timeout=600,
             write_timeout=600,
             connect_timeout=60,
         )
+        if msg_out and msg_out.document:
+            await db.set_file_id(file_cache_key, msg_out.document.file_id)
         stats.mark_download(ok=True)
     except BooksApiError as e:
         stats.mark_download(ok=False)
@@ -316,6 +397,7 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 def register(application: Application) -> None:
+    application.add_handler(CallbackQueryHandler(on_book_page, pattern=r"^bpage:\d+$"))
     application.add_handler(CallbackQueryHandler(on_book_pick, pattern=r"^book:\d+$"))
     application.add_handler(CommandHandler("fuente", cmd_fuente))
     application.add_handler(CommandHandler("libro", cmd_libro))

@@ -89,11 +89,13 @@ def _validate_media(path: Path, *, min_bytes: int, min_duration: float | None, i
             )
 
 
-def _make_progress_hook(bot, chat_id, message_id, loop):
+def _make_progress_hook(bot, chat_id, message_id, loop, job=None):
     import time
     import asyncio
     last_edit = [time.time()]
     def hook(d: dict):
+        if job is not None and getattr(job, "cancel_requested", False):
+            raise Exception("Descarga cancelada por el usuario.")
         if not bot or not chat_id or not message_id or not loop:
             return
         if d.get("status") == "downloading":
@@ -111,7 +113,7 @@ def _make_progress_hook(bot, chat_id, message_id, loop):
     return hook
 
 
-def download_best_audio(url: str, settings: Settings, bot=None, chat_id=None, message_id=None, loop=None) -> tuple[Path, Path]:
+def download_best_audio(url: str, settings: Settings, bot=None, chat_id=None, message_id=None, loop=None, job=None) -> tuple[Path, Path]:
     """MP3/M4A/WebM según lo que entregue la fuente (sin conversión forzada)."""
     work_dir = _work_dir(settings)
     opts: dict = {
@@ -120,7 +122,12 @@ def download_best_audio(url: str, settings: Settings, bot=None, chat_id=None, me
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
+        "writethumbnail": True,
+        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop, job=job)],
+        "postprocessors": [
+            {"key": "FFmpegMetadata"},
+            {"key": "EmbedThumbnail"},
+        ],
     }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -134,7 +141,7 @@ def download_best_audio(url: str, settings: Settings, bot=None, chat_id=None, me
         raise
 
 
-def download_apple_m4a(url: str, settings: Settings, bot=None, chat_id=None, message_id=None, loop=None) -> tuple[Path, Path]:
+def download_apple_m4a(url: str, settings: Settings, bot=None, chat_id=None, message_id=None, loop=None, job=None) -> tuple[Path, Path]:
     """Audio en M4A vía FFmpeg (útil para ecosistema Apple)."""
     work_dir = _work_dir(settings)
     opts: dict = {
@@ -143,12 +150,15 @@ def download_apple_m4a(url: str, settings: Settings, bot=None, chat_id=None, mes
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
+        "writethumbnail": True,
+        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop, job=job)],
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "m4a",
             },
+            {"key": "FFmpegMetadata"},
+            {"key": "EmbedThumbnail"},
         ],
     }
     try:
@@ -162,7 +172,7 @@ def download_apple_m4a(url: str, settings: Settings, bot=None, chat_id=None, mes
         raise
 
 
-def download_best_video(url: str, settings: Settings, bot=None, chat_id=None, message_id=None, loop=None) -> tuple[Path, Path]:
+def download_best_video(url: str, settings: Settings, bot=None, chat_id=None, message_id=None, loop=None, job=None) -> tuple[Path, Path]:
     """Mejor formato combinado o único que suela ser MP4/WebM."""
     work_dir = _work_dir(settings)
     opts: dict = {
@@ -173,18 +183,17 @@ def download_best_video(url: str, settings: Settings, bot=None, chat_id=None, me
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "writethumbnail": False,
+        "writethumbnail": True,
         "writeinfojson": False,
-        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
+        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop, job=job)],
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "web"],
             },
         },
         "postprocessors": [
-            {
-                "key": "FFmpegMetadataPP",
-            },
+            {"key": "FFmpegMetadata"},
+            {"key": "EmbedThumbnail"},
             {
                 "key": "FFmpegVideoRemuxer",
                 "preferedformat": "mp4",
@@ -203,8 +212,8 @@ def download_best_video(url: str, settings: Settings, bot=None, chat_id=None, me
         raise
 
 
-def download_audio_format(url: str, settings: Settings, fmt: str, bot=None, chat_id=None, message_id=None, loop=None) -> tuple[Path, Path]:
-    VALID_FMTS = {"mp3", "m4a", "opus", "flac", "aac"}
+def download_audio_format(url: str, settings: Settings, fmt: str, bot=None, chat_id=None, message_id=None, loop=None, job=None) -> tuple[Path, Path]:
+    VALID_FMTS = {"mp3", "m4a", "opus", "flac"}
     if fmt not in VALID_FMTS:
         raise ValueError(f"Formato no soportado: {fmt}")
     work_dir = _work_dir(settings)
@@ -214,14 +223,16 @@ def download_audio_format(url: str, settings: Settings, fmt: str, bot=None, chat
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "writethumbnail": False,
+        "writethumbnail": True,
         "writeinfojson": False,
-        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop)],
+        "progress_hooks": [_make_progress_hook(bot, chat_id, message_id, loop, job=job)],
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": fmt,
             },
+            {"key": "FFmpegMetadata"},
+            {"key": "EmbedThumbnail"},
         ],
     }
     try:
@@ -242,3 +253,24 @@ def cleanup_download(path: Path) -> None:
         shutil.rmtree(path.parent, ignore_errors=True)
     except OSError:
         pass
+
+
+def extract_playlist(url: str) -> list[str]:
+    """Extrae las URLs de una lista de reproducción usando yt-dlp."""
+    opts = {
+        "extract_flat": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return []
+            if "entries" in info:
+                return [e.get("url") for e in info["entries"] if e.get("url")]
+            else:
+                return [url]
+    except Exception:
+        return [url]
+

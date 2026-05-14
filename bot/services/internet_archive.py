@@ -15,6 +15,7 @@ from urllib.parse import urlencode
 import aiohttp
 
 from bot.services.books_api import BookResult, BooksApiError
+from bot.services._book_validation import validate_book_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,8 @@ async def download_internet_archive(
 
     if len(data) > limit:
         raise BooksApiError("El archivo descargado supera MAX_FILE_SIZE_MB.")
+
+    validate_book_bytes(data)
 
     title = str(meta.get("metadata", {}).get("title", identifier)).strip()
     out_filename = f"{_safe_filename(title)}{ext}"
