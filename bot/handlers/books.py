@@ -19,6 +19,7 @@ from bot.services.internet_archive import download_internet_archive, search_inte
 from bot.services.libgen import download_libgen, search_libgen
 from bot.services.open_library import search_open_library
 from bot.services.standard_ebooks import download_standard_ebooks, search_standard_ebooks
+from bot.utils.cache import BoundedTTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -208,15 +209,17 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             book_source = "open_library"
 
-    import time
-    cache = context.application.bot_data.setdefault("book_search_cache", {})
+    cache = context.application.bot_data.get("book_search_cache")
+    if cache is None:
+        cache = BoundedTTLCache(maxsize=100, ttl=300)
+        context.application.bot_data["book_search_cache"] = cache
+
     cache_key = f"{book_source}:{q}"
-    now = time.time()
     
-    cached = cache.get(cache_key)
-    if cached and now - cached.get("timestamp", 0) < 300:
+    cached_results = cache.get(cache_key)
+    if cached_results is not None:
         logger.debug("book cache hit for %s", cache_key)
-        results = cached.get("results", [])
+        results = cached_results
     else:
         logger.debug("book cache miss for %s", cache_key)
         try:
@@ -224,7 +227,7 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if book_source == "gutenberg":
                 results = await search_gutenberg(session, q, fetch_limit)
             elif book_source == "libgen":
-                results = await search_libgen(q, fetch_limit)
+                results = await search_libgen(session, q, fetch_limit, settings)
             elif book_source == "open_library":
                 results = await search_open_library(session, q, fetch_limit)
             elif book_source == "dbooks":
@@ -241,7 +244,7 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await msg.reply_text(str(e))
             return
             
-        cache[cache_key] = {"timestamp": now, "results": results}
+        cache.set(cache_key, results)
 
     if not results:
         await msg.reply_text("No encontré resultados para esa búsqueda.")

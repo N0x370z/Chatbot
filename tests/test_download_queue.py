@@ -20,6 +20,7 @@ def _make_settings(tmp_path: Path) -> Settings:
     return Settings(
         telegram_bot_token="fake_token",
         admin_user_id=0,
+        allowed_user_ids=frozenset(),
         max_file_size_mb=50,
         download_path=tmp_path,
         log_level="WARNING",
@@ -27,6 +28,8 @@ def _make_settings(tmp_path: Path) -> Settings:
         rate_limit_max_requests=10,
         books_api_base_url="",
         books_api_key="",
+        books_api_key_header="Authorization",
+        books_api_key_prefix="Bearer",
         books_api_search_path="books/search",
         books_api_download_path_template="books/{id}/download",
         books_api_query_param="q",
@@ -254,3 +257,32 @@ def test_run_job_no_retry_on_too_large(tmp_path: Path):
 
     assert job.status == "failed"
     assert call_count == 1   # solo 1 intento
+
+
+def test_enqueue_normal_and_full(tmp_path: Path):
+    stats = BotStats()
+    q = DownloadQueue(settings=_make_settings(tmp_path), stats=stats)
+    app = MagicMock()
+    app.create_task = MagicMock()
+    
+    for i in range(20):
+        asyncio.run(q.enqueue(app, kind="audio", url=f"http://test/{i}", chat_id=1, user_id=1))
+    
+    assert q._queue.qsize() == 20
+    
+    with pytest.raises(ValueError, match="La cola de descargas está llena"):
+        asyncio.run(q.enqueue(app, kind="audio", url="http://test/21", chat_id=1, user_id=1))
+
+
+def test_run_job_respects_cancel_requested(tmp_path: Path):
+    stats = BotStats()
+    q = DownloadQueue(settings=_make_settings(tmp_path), stats=stats)
+    app = MagicMock()
+    
+    job = DownloadJob(id="testcancel", kind="audio", url="http://test/c", chat_id=1, user_id=1)
+    job.cancel_requested = True
+    
+    asyncio.run(q._run_job(app, job))
+    
+    assert job.status == "failed"
+    assert job.error == "Cancelado por el usuario"

@@ -5,3 +5,7 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
+
+[tool.pyright]
+include = ["bot", "src", "tests", "main.py", "main_worker.py"]
+extraPaths = ["."]

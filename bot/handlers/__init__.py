@@ -58,10 +58,17 @@ async def cmd_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     # jobs_for_user returns sorted by created_at DESC → index 0 = most recent
     latest_job = queued_jobs[0]
+    latest_job.cancel_requested = True
     latest_job.status = "failed"
     latest_job.error = "Cancelado por el usuario"
 
     await update.effective_message.reply_text(f"Descarga #{latest_job.id} cancelada.")
+
+
+async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    import os
+    git_sha = os.environ.get("GIT_SHA", "dev")
+    await update.effective_message.reply_text(f"TelegramMediaBot\nVersión: {git_sha}")
 
 
 def register_handlers(application: Application, admin_user_id: int) -> None:
@@ -70,6 +77,7 @@ def register_handlers(application: Application, admin_user_id: int) -> None:
     application.add_handler(CommandHandler("ping", cmd_ping))
     application.add_handler(CommandHandler("jobs", cmd_jobs))
     application.add_handler(CommandHandler("cancelar", cmd_cancelar))
+    application.add_handler(CommandHandler("version", cmd_version))
     books.register(application)
     audio.register(application)
     video.register(application)

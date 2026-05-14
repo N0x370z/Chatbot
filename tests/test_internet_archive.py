@@ -133,10 +133,10 @@ def test_download_internet_archive_epub_preferred():
     }
     session = DummySession([
         DummyResponse(meta),
-        DummyResponse(content=b"epub_bytes"),
+        DummyResponse(content=b"PK\x03\x04bytes"),
     ])
     data, fname = asyncio.run(download_internet_archive(session, "myid", MockSettings()))
-    assert data == b"epub_bytes"
+    assert data == b"PK\x03\x04bytes"
     assert fname.endswith(".epub")
 
 
@@ -149,10 +149,10 @@ def test_download_internet_archive_pdf_fallback():
     }
     session = DummySession([
         DummyResponse(meta),
-        DummyResponse(content=b"pdf_bytes"),
+        DummyResponse(content=b"%PDF_bytes"),
     ])
     data, fname = asyncio.run(download_internet_archive(session, "myid", MockSettings()))
-    assert data == b"pdf_bytes"
+    assert data == b"%PDF_bytes"
     assert fname.endswith(".pdf")
 
 

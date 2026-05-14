@@ -84,10 +84,10 @@ def test_download_dbooks_success():
     meta_payload = {"status": "ok", "download": "http://dl", "title": "Linux"}
     session = DummySession([
         DummyResponse(meta_payload),
-        DummyResponse(content=b"pdf_data", content_length=8)
+        DummyResponse(content=b"%PDF_data", content_length=9)
     ])
     data, filename = asyncio.run(download_dbooks(session, "1", MockSettings()))
-    assert data == b"pdf_data"
+    assert data == b"%PDF_data"
     assert filename == "Linux.pdf"
 
 

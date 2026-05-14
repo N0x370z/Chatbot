@@ -24,6 +24,7 @@ HELP_HTML = (
     "• /estado — ver preferencias de la sesión\n"
     "• /jobs — estado de descargas en cola\n"
     "• /cancelar — cancelar descarga pendiente\n"
+    "• /version — ver versión del bot\n"
     "• Enviar PDF/EPUB — guardar en biblioteca\n"
     "• /stats — estadísticas (solo admin)\n\n"
     "<b>Ejemplo</b>\n"

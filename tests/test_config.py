@@ -13,6 +13,7 @@ def _full_settings(**overrides) -> Settings:
     base = dict(
         telegram_bot_token="test_token",
         admin_user_id=1,
+        allowed_user_ids=frozenset(),
         max_file_size_mb=50,
         download_path=Path("/tmp"),
         log_level="INFO",
@@ -20,6 +21,8 @@ def _full_settings(**overrides) -> Settings:
         rate_limit_max_requests=10,
         books_api_base_url="",
         books_api_key="",
+        books_api_key_header="Authorization",
+        books_api_key_prefix="Bearer",
         books_api_search_path="/search",
         books_api_download_path_template="/download/{id}",
         books_api_query_param="q",

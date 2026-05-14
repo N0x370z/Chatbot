@@ -28,7 +28,9 @@ async def post_init(application: Application) -> None:
     settings: Settings = application.bot_data["settings"]
     headers = {"User-Agent": "TelegramMediaBot/1.0"}
     if settings.books_api_key:
-        headers["Authorization"] = f"Bearer {settings.books_api_key}"
+        key_prefix = settings.books_api_key_prefix
+        key_value = f"{key_prefix} {settings.books_api_key}".strip() if key_prefix else settings.books_api_key
+        headers[settings.books_api_key_header] = key_value
     timeout = aiohttp.ClientTimeout(total=settings.books_api_timeout_sec)
     connector = aiohttp.TCPConnector(ssl=settings.ssl_verify)
     application.bot_data["http_session"] = aiohttp.ClientSession(
@@ -36,12 +38,28 @@ async def post_init(application: Application) -> None:
         timeout=timeout,
         connector=connector,
     )
-
+    from telegram import BotCommand
+    commands = [
+        BotCommand("start", "Mostrar el menú principal"),
+        BotCommand("ayuda", "Mostrar instrucciones de uso"),
+        BotCommand("libro", "Buscar un libro por título o autor"),
+        BotCommand("fuente", "Cambiar la fuente de búsqueda de libros"),
+        BotCommand("convertir", "Activar/desactivar conversión a EPUB/MOBI"),
+        BotCommand("jobs", "Ver tus descargas en curso"),
+        BotCommand("cancelar", "Cancelar tu descarga más reciente"),
+        BotCommand("estado", "Ver estado y caché del bot"),
+        BotCommand("version", "Mostrar la versión del bot"),
+    ]
+    await application.bot.set_my_commands(commands)
 
 async def post_shutdown(application: Application) -> None:
     session: aiohttp.ClientSession | None = application.bot_data.get("http_session")
     if session is not None and not session.closed:
         await session.close()
+    
+    queue = application.bot_data.get("download_queue")
+    if queue is not None and queue._worker_task is not None:
+        queue._worker_task.cancel()
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -50,6 +68,37 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         update,
         exc_info=context.error,
     )
+    # Notify user if possible, without leaking tracebacks
+    try:
+        effective_message = getattr(update, "effective_message", None)
+        if effective_message is not None:
+            await effective_message.reply_text(
+                "Algo falló procesando tu solicitud. Revisa /jobs o intenta de nuevo."
+            )
+    except Exception:
+        pass
+
+
+async def check_allowed_user(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """TypeHandler in group=-2: reject users not in the allow-list."""
+    settings: Settings = context.bot_data["settings"]
+    allowed = settings.allowed_user_ids
+    if not allowed:
+        return  # no restriction
+    user = getattr(update, "effective_user", None)
+    if user is None:
+        return
+    if user.id == settings.admin_user_id or user.id in allowed:
+        return
+    # Reject and stop processing
+    logger.info("Update de usuario no autorizado: %s", user.id)
+    try:
+        effective_message = getattr(update, "effective_message", None)
+        if effective_message is not None:
+            await effective_message.reply_text("No estás autorizado para usar este bot.")
+    except Exception:
+        pass
+    raise ApplicationHandlerStop()
 
 
 async def on_any_update(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -106,6 +155,7 @@ def main() -> None:
     application.bot_data["db"] = Database(db_path)
 
     register_handlers(application, admin_user_id=settings.admin_user_id)
+    application.add_handler(TypeHandler(object, check_allowed_user), group=-2)
     application.add_handler(TypeHandler(object, on_any_update), group=-1)
     application.add_error_handler(error_handler)
 

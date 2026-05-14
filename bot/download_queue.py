@@ -53,13 +53,14 @@ class DownloadJob:
     finished_at: datetime | None = None
     audio_format: str = "mp3"
     retry_count: int = 0          # cuántos reintentos se han realizado
+    cancel_requested: bool = False  # señal de cancelación cooperativa
 
 
 class DownloadQueue:
     def __init__(self, *, settings: Settings, stats: BotStats) -> None:
         self.settings = settings
         self.stats = stats
-        self._queue: asyncio.Queue[DownloadJob] = asyncio.Queue()
+        self._queue: asyncio.Queue[DownloadJob] = asyncio.Queue(maxsize=20)
         self._jobs: dict[str, DownloadJob] = {}
         self._worker_task: asyncio.Task[None] | None = None
 
@@ -82,6 +83,8 @@ class DownloadQueue:
         user_id: int,
         audio_format: str = "mp3",
     ) -> DownloadJob:
+        if self._queue.full():
+            raise ValueError("La cola de descargas está llena. Intenta más tarde.")
         self.ensure_started(application)
         job = DownloadJob(
             id=uuid4().hex[:8],
@@ -103,7 +106,7 @@ class DownloadQueue:
     async def _worker(self, application: Application) -> None:
         while True:
             job = await self._queue.get()
-            if job.status != "failed":
+            if job.status != "failed" and not job.cancel_requested:
                 await self._run_job(application, job)
             self._queue.task_done()
 
@@ -129,17 +132,17 @@ class DownloadQueue:
                 if job.kind == "apple":
                     path, work_dir = await asyncio.to_thread(
                         download_apple_m4a, job.url, self.settings,
-                        bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop,
+                        bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop, job=job,
                     )
-                elif job.audio_format in {"m4a", "opus", "flac", "aac"}:
+                elif job.audio_format in {"m4a", "opus", "flac"}:
                     path, work_dir = await asyncio.to_thread(
                         download_audio_format, job.url, self.settings, job.audio_format,
-                        bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop,
+                        bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop, job=job,
                     )
                 else:
                     path, work_dir = await asyncio.to_thread(
                         download_best_audio, job.url, self.settings,
-                        bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop,
+                        bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop, job=job,
                     )
                 await bot.delete_message(chat_id=job.chat_id, message_id=msg.message_id)
                 sent = await send_audio_or_document(bot, chat_id=job.chat_id, path=path)
@@ -151,7 +154,7 @@ class DownloadQueue:
                 msg = await bot.send_message(chat_id=job.chat_id, text="⏳ Preparando descarga...")
                 path, work_dir = await asyncio.to_thread(
                     download_best_video, job.url, self.settings,
-                    bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop,
+                    bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop, job=job,
                 )
                 await bot.delete_message(chat_id=job.chat_id, message_id=msg.message_id)
                 sent = await send_video_or_document(bot, chat_id=job.chat_id, path=path)
@@ -170,6 +173,12 @@ class DownloadQueue:
     # ──────────────────────────────────────────────────────────────────────────
 
     async def _run_job(self, application: Application, job: DownloadJob) -> None:
+        # Honour cancellation requested before the worker picked up the job
+        if job.cancel_requested:
+            job.status = "failed"
+            job.error = "Cancelado por el usuario"
+            job.finished_at = datetime.now(UTC)
+            return
         bot = application.bot
         db: Database | None = application.bot_data.get("db")
         job.status = "running"

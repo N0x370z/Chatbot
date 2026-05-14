@@ -11,6 +11,7 @@ import aiohttp
 
 from bot.services.books_api import BookResult, BooksApiError
 from bot.services.http_utils import _retry_get
+from bot.services._book_validation import validate_book_bytes
 
 logger = logging.getLogger(__name__)
 GUTENDEX_SEARCH_URL = "https://gutendex.com/books"
@@ -120,6 +121,8 @@ async def download_gutenberg(
 
     if len(data) > limit:
         raise BooksApiError("El archivo descargado supera MAX_FILE_SIZE_MB.")
+
+    validate_book_bytes(data)
 
     title = str(payload.get("title", "libro")).strip()
     filename = f"{_safe_filename(title)}.epub"

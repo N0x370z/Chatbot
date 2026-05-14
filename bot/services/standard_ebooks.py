@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ET
 import aiohttp
 
 from bot.services.books_api import BookResult, BooksApiError
+from bot.services._book_validation import validate_book_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,8 @@ async def download_standard_ebooks(
 
     if len(data) > limit:
         raise BooksApiError("El archivo descargado supera MAX_FILE_SIZE_MB.")
+
+    validate_book_bytes(data)
 
     # Derive filename from URL path
     raw_name = epub_url.rstrip("/").split("/")[-1]
