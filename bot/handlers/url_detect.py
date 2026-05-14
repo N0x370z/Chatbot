@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from bot.deps import limiter_from, queue_from, stats_from
@@ -33,7 +33,7 @@ def _is_audio_domain(url: str) -> bool:
 async def on_url_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     user = update.effective_user
-    if not msg or not user or not msg.text:
+    if not msg or not user or not msg.text or not update.effective_chat or context.user_data is None:
         return
 
     url = _extract_url(msg.text)
@@ -79,7 +79,9 @@ async def on_url_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def on_url_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not query or not update.effective_user:
+    if not query or not update.effective_user or context.user_data is None:
+        return
+    if not isinstance(query.message, Message):
         return
     await query.answer()
 

@@ -16,6 +16,8 @@ VALID_AUDIO_FMTS = {"mp3": "MP3", "m4a": "M4A (Apple)", "opus": "OPUS", "flac": 
 
 async def cmd_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    if not update.effective_message or not update.effective_chat or context.user_data is None:
+        return
     stats = stats_from(context)
     stats.mark_command("audio", user.id if user else None)
     url = url_from_message_args(context)
@@ -67,6 +69,8 @@ async def cmd_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_apple(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    if not update.effective_message or not update.effective_chat:
+        return
     stats = stats_from(context)
     stats.mark_command("apple", user.id if user else None)
     url = url_from_message_args(context)
@@ -112,6 +116,8 @@ async def cmd_apple(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_formato_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_message or context.user_data is None:
+        return
     current = context.user_data.get("audio_format", "mp3")
     buttons = [
         [
@@ -127,6 +133,8 @@ async def cmd_formato_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def on_audio_fmt_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    if not query or not query.data or context.user_data is None:
+        return
     await query.answer()
     fmt = query.data.removeprefix(AUDIO_FMT_PREFIX)
     if fmt not in VALID_AUDIO_FMTS:

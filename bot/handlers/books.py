@@ -7,7 +7,7 @@ import io
 import logging
 from pathlib import Path
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from bot.deps import db_from, http_session_from, limiter_from, settings_from, stats_from
@@ -68,10 +68,11 @@ def _build_books_keyboard(pending: list[dict], page: int, page_size: int) -> Inl
 
 async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    msg = update.effective_message
+    if not msg or context.user_data is None:
+        return
     stats = stats_from(context)
     stats.mark_command("fuente", user.id if user else None)
-
-    msg = update.effective_message
     args = context.args or []
     if not args:
         current = context.user_data.get("book_source", "open_library")
@@ -98,8 +99,10 @@ async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
-    stats_from(context).mark_command("convertir", user.id if user else None)
     msg = update.effective_message
+    if not msg or context.user_data is None:
+        return
+    stats_from(context).mark_command("convertir", user.id if user else None)
     args = context.args or []
 
     if not args:
@@ -177,10 +180,11 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    msg = update.effective_message
+    if not msg or context.user_data is None:
+        return
     stats = stats_from(context)
     stats.mark_command("libro", user.id if user else None)
-
-    msg = update.effective_message
     q = " ".join(context.args).strip() if context.args else ""
     if not q:
         await msg.reply_html(
@@ -264,7 +268,9 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def on_book_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not query or not query.message:
+    if not query or not query.message or context.user_data is None:
+        return
+    if not isinstance(query.message, Message):
         return
     await query.answer()
 
@@ -292,7 +298,9 @@ async def on_book_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not query or not query.message:
+    if not query or not query.message or context.user_data is None:
+        return
+    if not isinstance(query.message, Message):
         return
     await query.answer()
 
