@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-from pathlib import Path
-
-from bot.handlers.uploads import _is_supported, _safe_name, _verify_file_integrity
 from unittest.mock import MagicMock
 
+from bot.handlers.uploads import _is_supported, _safe_name, _verify_file_integrity
 
 # ---------- _is_supported ----------
 

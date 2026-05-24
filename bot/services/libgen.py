@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
-import html
 import hashlib
+import html
 import logging
 import re
-from urllib.parse import urlencode, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
-from bot.services.books_api import BookResult, BooksApiError
 from bot.services._book_validation import validate_book_bytes
+from bot.services.books_api import BookResult, BooksApiError
 
 logger = logging.getLogger(__name__)
 LIBGEN_HOSTS = ("https://libgen.li",)
@@ -94,7 +93,7 @@ async def search_libgen(
             ) as resp:
                 resp.raise_for_status()
                 payload = await resp.text()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "libgen.li no respondió (timeout) — la fuente está temporalmente no disponible"
             )
@@ -121,7 +120,7 @@ def _parse_libgen_search_html(html_payload: str, host: str, max_results: int) ->
         cells = re.findall(r"<td[^>]*>(.*?)</td>", row, flags=re.S | re.I)
         if len(cells) < 9:
             continue
-            
+
         if "libgen.li" in host:
             title_html = cells[0]
             author_html = cells[1]
@@ -132,7 +131,7 @@ def _parse_libgen_search_html(html_payload: str, host: str, max_results: int) ->
             title_html = cells[2]
             author_html = cells[1]
             mirrors_html = cells[9]
-            
+
         title = _clean_text(title_html)
         if not title:
             continue
@@ -141,9 +140,7 @@ def _parse_libgen_search_html(html_payload: str, host: str, max_results: int) ->
         if not download_links:
             continue
         download_url = download_links[0]
-        if download_url.startswith("/"):
-            download_url = urljoin(host, download_url)
-        elif not download_url.startswith(("http://", "https://")):
+        if download_url.startswith("/") or not download_url.startswith(("http://", "https://")):
             download_url = urljoin(host, download_url)
         label = f"{title} - {author}" if author else title
         results.append(BookResult(id=download_url, title=label[:500]))
@@ -173,17 +170,15 @@ async def download_libgen(
     )
 
     download_url = book_id
-    filename_hint = None
 
     if is_intermediate:
         # Paso 2: hacer GET a la página intermedia y extraer link real
         try:
             # Usar SSL bypass para intermediate pages si es libgen.li
             connector = aiohttp.TCPConnector(ssl=settings.ssl_verify) if "libgen.li" in book_id else None
-            async with aiohttp.ClientSession(connector=connector) as tmp_session:
-                async with tmp_session.get(book_id, timeout=timeout_page) as resp:
-                    resp.raise_for_status()
-                    html_text = await resp.text(errors="replace")
+            async with aiohttp.ClientSession(connector=connector) as tmp_session, tmp_session.get(book_id, timeout=timeout_page) as resp:
+                resp.raise_for_status()
+                html_text = await resp.text(errors="replace")
         except aiohttp.ClientError as e:
             raise BooksApiError("No se pudo acceder a la página de descarga.") from e
 
@@ -213,7 +208,7 @@ async def download_libgen(
     # Paso 3: descargar el archivo real
     allowed_domains = ["libgen.li", "libgen.is", "libgen.rs", "libgen.st"]
     parsed_download_url = urlparse(download_url)
-    
+
     if not any(
         parsed_download_url.netloc == d or parsed_download_url.netloc.endswith("." + d)
         for d in allowed_domains
@@ -222,17 +217,16 @@ async def download_libgen(
 
     try:
         connector = aiohttp.TCPConnector(ssl=settings.ssl_verify)
-        async with aiohttp.ClientSession(connector=connector) as tmp_session:
-            async with tmp_session.get(download_url, timeout=timeout_file) as resp:
-                resp.raise_for_status()
-                content_length = resp.content_length
-                if content_length is not None and content_length > limit:
-                    raise BooksApiError(
-                        f"El archivo (~{content_length // (1024*1024)} MB) supera el límite."
-                    )
-                data = await resp.read()
-                cd = resp.headers.get("Content-Disposition", "")
-                ctype = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        async with aiohttp.ClientSession(connector=connector) as tmp_session, tmp_session.get(download_url, timeout=timeout_file) as resp:
+            resp.raise_for_status()
+            content_length = resp.content_length
+            if content_length is not None and content_length > limit:
+                raise BooksApiError(
+                    f"El archivo (~{content_length // (1024*1024)} MB) supera el límite."
+                )
+            data = await resp.read()
+            cd = resp.headers.get("Content-Disposition", "")
+            ctype = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
     except aiohttp.ClientError as e:
         logger.error("Download failed from %s: %s", download_url, e)
         raise BooksApiError("No se pudo descargar el libro desde Libgen.") from e

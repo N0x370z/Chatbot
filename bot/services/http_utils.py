@@ -1,5 +1,6 @@
 import asyncio
 import logging
+
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -15,26 +16,26 @@ async def _retry_get(session: aiohttp.ClientSession, url: str, **kwargs) -> aioh
     """
     delays = [1, 2]
     attempts = 3
-    
+
     for attempt in range(attempts):
         try:
             resp = await session.get(url, **kwargs)
-            
+
             # If 4xx, do not retry, just return or let caller handle it.
             # We'll just return the response and let the caller do raise_for_status().
             # BUT wait, what if it's 5xx? We should retry 5xx!
             if 400 <= resp.status < 500:
                 return resp
-                
+
             if resp.status >= 500:
                 resp.raise_for_status() # trigger ClientResponseError to retry
-            
+
             return resp
-            
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+
+        except (TimeoutError, aiohttp.ClientError) as e:
             if isinstance(e, aiohttp.ClientResponseError) and 400 <= e.status < 500:
                 raise # do not retry 4xx
-                
+
             if attempt < attempts - 1:
                 logger.warning("Request to %s failed (%s), retrying in %ds...", url, e, delays[attempt])
                 await asyncio.sleep(delays[attempt])

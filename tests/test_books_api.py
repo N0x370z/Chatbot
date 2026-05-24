@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
-import aiohttp
 from unittest.mock import Mock
+
+import aiohttp
+import pytest
 
 from bot.config import Settings
 from bot.services.books_api import (
     BookResult,
+    BooksApiError,
+    _full_request_url,
+    _safe_filename,
+    download_book_bytes,
     normalize_book_results,
     search_books,
-    download_book_bytes,
-    _safe_filename,
-    _full_request_url,
-    BooksApiError
 )
 
 
@@ -93,6 +94,7 @@ def test_safe_filename() -> None:
 
 from pathlib import Path
 
+
 def _dummy_settings(books_api_base_url="http://api.example.com", max_file_size_mb=50) -> Settings:
     return Settings(
         telegram_bot_token="123",
@@ -129,7 +131,7 @@ def test_search_books_success() -> None:
     s = _dummy_settings()
     payload = {"results": [{"id": "1", "title": "Test Book"}]}
     session = DummySession([DummyResponse(payload)])
-    
+
     results = asyncio.run(search_books(session, s, "query"))
     assert len(results) == 1
     assert results[0].id == "1"
@@ -167,7 +169,7 @@ def test_download_book_bytes_success() -> None:
     s = _dummy_settings()
     headers = {"Content-Disposition": 'attachment; filename="test.pdf"'}
     session = DummySession([DummyResponse(content=b"hello", headers=headers, content_length=5)])
-    
+
     data, filename = asyncio.run(download_book_bytes(session, s, "1"))
     assert data == b"hello"
     assert filename == "test.pdf"
@@ -198,7 +200,7 @@ def test_download_book_bytes_fallback_filename() -> None:
     s = _dummy_settings()
     headers = {"Content-Type": "application/epub+zip"}
     session = DummySession([DummyResponse(content=b"epub_data", headers=headers)])
-    
+
     data, filename = asyncio.run(download_book_bytes(session, s, "mybook"))
     assert data == b"epub_data"
     assert filename == "mybook.epub"

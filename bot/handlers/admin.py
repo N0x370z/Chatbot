@@ -49,12 +49,12 @@ def register(application: Application, *, admin_user_id: int) -> None:
         user = update.effective_user
         if not update.effective_message or admin_user_id == 0 or user is None or user.id != admin_user_id:
             return
-        
+
         args = context.args
         if not args or not args[0].isdigit():
             await update.effective_message.reply_text("Uso: /ban <user_id>")
             return
-            
+
         target_id = int(args[0])
         await db_from(context).set_banned(target_id, True)
         await update.effective_message.reply_text(f"Usuario {target_id} ha sido baneado.")
@@ -63,12 +63,12 @@ def register(application: Application, *, admin_user_id: int) -> None:
         user = update.effective_user
         if not update.effective_message or admin_user_id == 0 or user is None or user.id != admin_user_id:
             return
-        
+
         args = context.args
         if not args or not args[0].isdigit():
             await update.effective_message.reply_text("Uso: /unban <user_id>")
             return
-            
+
         target_id = int(args[0])
         await db_from(context).set_banned(target_id, False)
         await update.effective_message.reply_text(f"Usuario {target_id} ha sido desbaneado.")
@@ -77,12 +77,12 @@ def register(application: Application, *, admin_user_id: int) -> None:
         user = update.effective_user
         if not update.effective_message or admin_user_id == 0 or user is None or user.id != admin_user_id:
             return
-            
+
         msg_text = " ".join(context.args)
         if not msg_text:
             await update.effective_message.reply_text("Uso: /broadcast <mensaje>")
             return
-            
+
         await update.effective_message.reply_text("Enviando broadcast...")
         users = await db_from(context).get_all_users()
         sent = 0
@@ -120,7 +120,7 @@ def register(application: Application, *, admin_user_id: int) -> None:
                     resp.raise_for_status()
                     ms = int((time.monotonic() - start) * 1000)
                     return f"✅ {name} — {ms}ms"
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return f"❌ {name} — timeout"
             except aiohttp.ClientError as exc:
                 return f"❌ {name} — {exc.__class__.__name__}"

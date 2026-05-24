@@ -56,7 +56,7 @@ async def post_shutdown(application: Application) -> None:
     session: aiohttp.ClientSession | None = application.bot_data.get("http_session")
     if session is not None and not session.closed:
         await session.close()
-    
+
     queue = application.bot_data.get("download_queue")
     if queue is not None and queue._worker_task is not None:
         queue._worker_task.cancel()
@@ -150,7 +150,7 @@ def main() -> None:
         settings=settings,
         stats=stats,
     )
-    
+
     db_path = settings.download_path / "bot.sqlite"
     application.bot_data["db"] = Database(db_path)
 

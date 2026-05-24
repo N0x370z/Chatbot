@@ -6,6 +6,7 @@ import asyncio
 import sqlite3
 from pathlib import Path
 
+
 class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -66,7 +67,7 @@ class Database:
         def _set() -> None:
             with sqlite3.connect(self.path) as conn:
                 conn.execute(
-                    "INSERT OR REPLACE INTO file_cache (key, file_id) VALUES (?, ?)", 
+                    "INSERT OR REPLACE INTO file_cache (key, file_id) VALUES (?, ?)",
                     (key, file_id)
                 )
         await asyncio.to_thread(_set)

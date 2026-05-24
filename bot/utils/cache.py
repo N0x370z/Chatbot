@@ -2,12 +2,9 @@
 
 import time
 from collections import OrderedDict
-from typing import TypeVar, Generic
 
-K = TypeVar("K")
-V = TypeVar("V")
 
-class BoundedTTLCache(Generic[K, V]):
+class BoundedTTLCache[K, V]:
     """Una caché en memoria simple con tamaño máximo y TTL basado en acceso."""
     def __init__(self, maxsize: int, ttl: float):
         self.maxsize = maxsize

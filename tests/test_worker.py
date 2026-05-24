@@ -1,6 +1,7 @@
-import shutil
 from pathlib import Path
+
 from src.background_worker import process_file
+
 
 def test_process_file(tmp_path: Path) -> None:
     incoming = tmp_path / "incoming"

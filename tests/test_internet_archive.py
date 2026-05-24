@@ -1,15 +1,16 @@
 """Tests for Internet Archive service."""
 
 import asyncio
-import pytest
 from unittest.mock import Mock
+
 import aiohttp
+import pytest
 
 from bot.services.internet_archive import (
-    search_internet_archive,
-    download_internet_archive,
-    _safe_filename,
     BooksApiError,
+    _safe_filename,
+    download_internet_archive,
+    search_internet_archive,
 )
 
 
@@ -102,7 +103,7 @@ def test_search_internet_archive_bad_json():
 
 
 def test_search_internet_archive_timeout():
-    session = DummySession([asyncio.TimeoutError()])
+    session = DummySession([TimeoutError()])
     with pytest.raises(BooksApiError, match="Internet Archive tardó demasiado"):
         asyncio.run(search_internet_archive(session, "linux", 5))
 

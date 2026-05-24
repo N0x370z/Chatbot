@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from bot.deps import queue_from, stats_from
-from bot.handlers import admin, audio, books, menu, uploads, video, estado, url_detect
+from bot.handlers import admin, audio, books, estado, menu, uploads, url_detect, video
 from bot.texts import HELP_HTML
 
 
@@ -52,7 +52,7 @@ async def cmd_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     stats_from(context).mark_command("cancelar", user.id if user else None)
     if user is None or not update.effective_message:
         return
-        
+
     queue = queue_from(context)
     jobs = queue.jobs_for_user(user.id)
     queued_jobs = [j for j in jobs if j.status == "queued"]

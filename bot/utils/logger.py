@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-import sys
 
 
 def setup_logging(level: str) -> None:

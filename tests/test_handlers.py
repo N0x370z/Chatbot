@@ -12,9 +12,8 @@ from bot.config import Settings, get_settings
 
 
 def test_get_settings_requires_token() -> None:
-    with patch.dict(os.environ, {}, clear=True):
-        with pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN"):
-            get_settings()
+    with patch.dict(os.environ, {}, clear=True), pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN"):
+        get_settings()
 
 
 def test_get_settings_loads(tmp_path: Path) -> None:

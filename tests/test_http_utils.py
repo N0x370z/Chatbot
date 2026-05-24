@@ -1,11 +1,13 @@
 """Tests for http_utils."""
 
 import asyncio
-import pytest
+from unittest.mock import AsyncMock, Mock
+
 import aiohttp
-from unittest.mock import Mock, AsyncMock
+import pytest
 
 from bot.services.http_utils import _retry_get
+
 
 class DummySession:
     def __init__(self, responses):
@@ -62,7 +64,7 @@ def test_retry_get_5xx_retry_fail(monkeypatch):
 
 def test_retry_get_timeout_retry_success(monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", AsyncMock())
-    session = DummySession([asyncio.TimeoutError(), DummyResponse(200)])
+    session = DummySession([TimeoutError(), DummyResponse(200)])
     resp = asyncio.run(_retry_get(session, "http://dummy"))
     assert resp.status == 200
     assert session.call_count == 2

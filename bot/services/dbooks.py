@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from urllib.parse import urlencode
 
 import aiohttp
 
+from bot.services._book_validation import validate_book_bytes
 from bot.services.books_api import BookResult, BooksApiError
 from bot.services.libgen import _safe_filename
-from bot.services._book_validation import validate_book_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +30,7 @@ async def search_dbooks(
         async with session.get(url, timeout=timeout) as resp:
             resp.raise_for_status()
             payload = await resp.json(content_type=None)
-    except asyncio.TimeoutError as e:
+    except TimeoutError as e:
         logger.warning("dbooks search timeout: %s", e)
         raise BooksApiError("dBooks tardó demasiado en responder.") from e
     except aiohttp.ClientError as e:
@@ -71,7 +69,7 @@ async def download_dbooks(
 ) -> tuple[bytes, str]:
     url = f"{DBOOKS_BOOK_URL}{book_id}"
     timeout_page = aiohttp.ClientTimeout(total=20, connect=8)
-    
+
     try:
         async with session.get(url, timeout=timeout_page) as resp:
             resp.raise_for_status()

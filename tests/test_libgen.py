@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from bot.services.libgen import _parse_libgen_search_html, _safe_filename
 
+
 def test_safe_filename() -> None:
     # spaces converted to underscores and special chars stripped
     assert _safe_filename("Hola Mundo!?*") == "Hola_Mundo"
@@ -43,7 +44,9 @@ def test_parse_libgen_search_html_extracts_download_urls() -> None:
 
 
 import asyncio
+
 from bot.services.libgen import search_libgen
+
 
 class DummyResponse:
     def __init__(self, text_data, status=200):
