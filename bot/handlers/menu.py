@@ -30,6 +30,8 @@ def main_menu_markup() -> InlineKeyboardMarkup:
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    if not update.effective_message or context.user_data is None:
+        return
     stats_from(context).mark_command("start", user.id if user else None)
     await update.effective_message.reply_html(
         WELCOME_HTML,

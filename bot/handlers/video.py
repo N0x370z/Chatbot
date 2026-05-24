@@ -13,6 +13,8 @@ from bot.utils.url_args import url_from_message_args
 
 async def cmd_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    if not update.effective_message or not update.effective_chat:
+        return
     stats = stats_from(context)
     stats.mark_command("video", user.id if user else None)
     url = url_from_message_args(context)

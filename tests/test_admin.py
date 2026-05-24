@@ -5,7 +5,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from telegram import Update
-from telegram.ext import ContextTypes
 
 from bot.handlers.admin import register
 

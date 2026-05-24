@@ -15,12 +15,7 @@ from bot.services.books_api import BookResult, BooksApiError
 from bot.services._book_validation import validate_book_bytes
 
 logger = logging.getLogger(__name__)
-LIBGEN_HOSTS = (
-    "https://libgen.li",
-    "https://libgen.is",
-    "https://libgen.rs",
-    "https://libgen.st",
-)
+LIBGEN_HOSTS = ("https://libgen.li",)
 LIBGEN_SEARCH_PATH = "/search.php"
 
 
@@ -100,10 +95,14 @@ async def search_libgen(
                 resp.raise_for_status()
                 payload = await resp.text()
         except asyncio.TimeoutError:
-            logger.warning("libgen timeout host=%s, probando siguiente", host)
+            logger.warning(
+                "libgen.li no respondió (timeout) — la fuente está temporalmente no disponible"
+            )
             continue
         except aiohttp.ClientError as e:
-            logger.warning("libgen error host=%s: %s", host, e)
+            logger.warning(
+                "libgen.li no está disponible: %s — la fuente está temporalmente no disponible", e
+            )
             continue
 
         results = _parse_libgen_search_html(payload, host, max_results)

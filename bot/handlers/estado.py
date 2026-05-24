@@ -8,7 +8,7 @@ async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not msg:
         return
     
-    book_source = context.user_data.get("book_source", "open_library")
+    book_source = context.user_data.get("book_source", "standard_ebooks")
     audio_format = context.user_data.get("audio_format", "mp3")
     last_uploaded = context.user_data.get("last_uploaded_file", "ninguno")
     
