@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 BOOK_PREFIX = "book:"
 BOOK_SOURCES = ("gutenberg", "libgen", "open_library", "dbooks", "internet_archive", "standard_ebooks")
+FALLBACK_CHAIN = ("standard_ebooks", "gutenberg", "internet_archive", "dbooks")
 SOURCE_LABELS = {
     "gutenberg": "Gutenberg",
     "libgen": "Libgen",
@@ -75,7 +76,7 @@ async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     stats.mark_command("fuente", user.id if user else None)
     args = context.args or []
     if not args:
-        current = context.user_data.get("book_source", "open_library")
+        current = context.user_data.get("book_source", "standard_ebooks")
         label = SOURCE_LABELS.get(current, current)
         sources_list = ", ".join(BOOK_SOURCES)
         await msg.reply_text(
@@ -178,6 +179,22 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await msg.reply_text("Error al enviar el archivo convertido.")
 
 
+async def _search_source(session, source: str, q: str, limit: int, settings) -> list[BookResult]:
+    if source == "gutenberg":
+        return await search_gutenberg(session, q, limit)
+    if source == "libgen":
+        return await search_libgen(session, q, limit, settings)
+    if source == "open_library":
+        return await search_open_library(session, q, limit)
+    if source == "dbooks":
+        return await search_dbooks(session, q, limit)
+    if source == "internet_archive":
+        return await search_internet_archive(session, q, limit)
+    if source == "standard_ebooks":
+        return await search_standard_ebooks(session, q, limit)
+    return await search_books(session, settings, q)
+
+
 async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     msg = update.effective_message
@@ -211,57 +228,70 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if settings.books_api_enabled:
             book_source = "api"
         else:
-            book_source = "open_library"
+            book_source = "standard_ebooks"
 
     cache = context.application.bot_data.get("book_search_cache")
     if cache is None:
         cache = BoundedTTLCache(maxsize=100, ttl=300)
         context.application.bot_data["book_search_cache"] = cache
 
-    cache_key = f"{book_source}:{q}"
-    
-    cached_results = cache.get(cache_key)
-    if cached_results is not None:
-        logger.debug("book cache hit for %s", cache_key)
-        results = cached_results
+    fetch_limit = settings.books_api_max_results * 4
+    results: list[BookResult] = []
+    effective_source = book_source
+    fallback_used: str | None = None
+
+    cached = cache.get(f"{book_source}:{q}")
+    if cached is not None:
+        logger.debug("book cache hit for %s:%s", book_source, q)
+        results = cached
     else:
-        logger.debug("book cache miss for %s", cache_key)
+        logger.debug("book cache miss for %s:%s", book_source, q)
         try:
-            fetch_limit = settings.books_api_max_results * 4  # fetch up to 4 pages
-            if book_source == "gutenberg":
-                results = await search_gutenberg(session, q, fetch_limit)
-            elif book_source == "libgen":
-                results = await search_libgen(session, q, fetch_limit, settings)
-            elif book_source == "open_library":
-                results = await search_open_library(session, q, fetch_limit)
-            elif book_source == "dbooks":
-                results = await search_dbooks(session, q, fetch_limit)
-            elif book_source == "internet_archive":
-                results = await search_internet_archive(session, q, fetch_limit)
-            elif book_source == "standard_ebooks":
-                results = await search_standard_ebooks(session, q, fetch_limit)
-            else:
-                results = await search_books(session, settings, q)
-                book_source = "api"
+            results = await _search_source(session, book_source, q, fetch_limit, settings)
         except BooksApiError as e:
-            logger.info("libro búsqueda: %s", e)
-            await msg.reply_text(str(e))
-            return
-            
-        cache.set(cache_key, results)
+            logger.info("libro búsqueda %s: %s", book_source, e)
+        if results:
+            cache.set(f"{book_source}:{q}", results)
 
     if not results:
-        await msg.reply_text("No encontré resultados para esa búsqueda.")
+        for fb in FALLBACK_CHAIN:
+            if fb == book_source:
+                continue
+            cached_fb = cache.get(f"{fb}:{q}")
+            if cached_fb is not None:
+                results = cached_fb
+                effective_source = fb
+                fallback_used = fb
+                break
+            try:
+                results = await _search_source(session, fb, q, fetch_limit, settings)
+            except BooksApiError as e:
+                logger.info("libro fallback %s: %s", fb, e)
+                continue
+            if results:
+                cache.set(f"{fb}:{q}", results)
+                effective_source = fb
+                fallback_used = fb
+                break
+
+    if not results:
+        await msg.reply_text(
+            "Ninguna fuente respondió para esa búsqueda. Inténtalo de nuevo más tarde."
+        )
         return
 
     context.user_data["books_pending"] = [
-        {"id": r.id, "title": r.title, "source": book_source} for r in results
+        {"id": r.id, "title": r.title, "source": effective_source} for r in results
     ]
-    
+
     keyboard = _build_books_keyboard(context.user_data["books_pending"], 0, settings.books_api_max_results)
     safe_q = html.escape(q)
+    fallback_note = (
+        f"\n<i>(usando {html.escape(SOURCE_LABELS.get(fallback_used, fallback_used))} como respaldo)</i>"
+        if fallback_used else ""
+    )
     await msg.reply_html(
-        f"Resultados para <b>{safe_q}</b>:",
+        f"Resultados para <b>{safe_q}</b>:{fallback_note}",
         reply_markup=keyboard,
     )
 
@@ -330,7 +360,13 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     source = str(item.get("source", context.user_data.get("books_source", "api")))
 
     if source == "open_library":
-        await query.message.reply_text(f"Busca este libro en: https://openlibrary.org{book_id}")
+        await query.message.reply_text(
+            "Open Library es un catálogo bibliográfico, no aloja archivos descargables.\n\n"
+            "Para obtener el archivo directamente, cambia la fuente con:\n"
+            "/fuente standard_ebooks — libros clásicos en ediciones cuidadas\n"
+            "/fuente gutenberg — mayor catálogo de dominio público\n\n"
+            f"Referencia: https://openlibrary.org{book_id}"
+        )
         context.user_data.pop("books_pending", None)
         return
 
