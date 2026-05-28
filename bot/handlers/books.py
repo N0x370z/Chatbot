@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 BOOK_PREFIX = "book:"
 BOOK_SOURCES = ("gutenberg", "libgen", "open_library", "dbooks", "internet_archive", "standard_ebooks")
-FALLBACK_CHAIN = ("standard_ebooks", "gutenberg", "internet_archive", "dbooks")
+FALLBACK_CHAIN = ("standard_ebooks", "gutenberg", "internet_archive", "dbooks", "libgen")
 SOURCE_LABELS = {
     "gutenberg": "Gutenberg",
     "libgen": "Libgen",

@@ -21,7 +21,7 @@ from bot.services.books_api import BookResult, BooksApiError
 
 logger = logging.getLogger(__name__)
 
-_OPDS_URL = "https://standardebooks.org/feeds/opds"
+_OPDS_URL = "https://standardebooks.org/feeds/opds/all"
 _NS = {
     "atom": "http://www.w3.org/2005/Atom",
     "dc": "http://purl.org/dc/terms/",

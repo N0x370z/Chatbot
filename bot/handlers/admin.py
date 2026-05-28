@@ -97,7 +97,7 @@ def register(application: Application, *, admin_user_id: int) -> None:
     _DIAG_PROBES = [
         ("Open Library",     "https://openlibrary.org/search.json?q=test&limit=1"),
         ("Gutendex",         "https://gutendex.com/books?search=test"),
-        ("Standard Ebooks",  "https://standardebooks.org/feeds/opds"),
+        ("Standard Ebooks",  "https://standardebooks.org/feeds/opds/all"),
         ("dBooks",           "https://www.dbooks.org/api/search/test"),
         ("Internet Archive", "https://archive.org/advancedsearch.php?q=test&output=json&rows=1"),
         ("Libgen",           "https://libgen.li/index.php?req=test&res=1"),
