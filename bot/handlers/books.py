@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 BOOK_PREFIX = "book:"
 BOOK_SOURCES = ("gutenberg", "libgen", "open_library", "dbooks", "internet_archive", "standard_ebooks")
-FALLBACK_CHAIN = ("standard_ebooks", "gutenberg", "internet_archive", "dbooks", "libgen")
+FALLBACK_CHAIN = ("open_library", "internet_archive", "dbooks", "libgen", "gutenberg", "standard_ebooks")
 SOURCE_LABELS = {
     "gutenberg": "Gutenberg",
     "libgen": "Libgen",
@@ -224,7 +224,7 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     session = http_session_from(context)
     book_source = context.user_data.get("book_source")
     if book_source not in BOOK_SOURCES:
-        book_source = "api" if settings.books_api_enabled else "standard_ebooks"
+        book_source = "api" if settings.books_api_enabled else "open_library"
 
     cache = context.application.bot_data.get("book_search_cache")
     if cache is None:

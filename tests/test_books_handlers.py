@@ -82,8 +82,8 @@ def test_cmd_fuente_default_standard_ebooks() -> None:
     assert "Fuente actual: Standard Ebooks" in msg
 
 
-def test_cmd_libro_default_standard_ebooks() -> None:
-    """Verifies that cmd_libro searches standard_ebooks as the default when not configured."""
+def test_cmd_libro_default_open_library() -> None:
+    """Verifies that cmd_libro searches open_library as the default when no API is configured."""
     update = _make_update()
     ctx = _make_context(args=["el", "quijote"])
 
@@ -92,12 +92,12 @@ def test_cmd_libro_default_standard_ebooks() -> None:
     async def mock_search_func(*args, **kwargs):
         return mock_results
 
-    with patch("bot.handlers.books.search_standard_ebooks", side_effect=mock_search_func) as mock_search:
+    with patch("bot.handlers.books.search_open_library", side_effect=mock_search_func) as mock_search:
         asyncio.run(cmd_libro(update, ctx))
 
         mock_search.assert_called_once()
         assert ctx.user_data["books_pending"] == [
-            {"id": "1", "title": "Don Quijote", "source": "standard_ebooks"}
+            {"id": "1", "title": "Don Quijote", "source": "open_library"}
         ]
         update.effective_message.reply_html.assert_called_once()
         reply_markup = update.effective_message.reply_html.call_kwargs.get("reply_markup")

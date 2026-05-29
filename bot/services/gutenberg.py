@@ -29,8 +29,7 @@ async def search_gutenberg(
 ) -> list[BookResult]:
     params = {"search": query}
     url = f"{GUTENDEX_SEARCH_URL}?{urlencode(params)}"
-    # Timeout propio más generoso que el global
-    timeout = aiohttp.ClientTimeout(total=30, connect=10)
+    timeout = aiohttp.ClientTimeout(total=12, connect=6)
 
     try:
         resp = await _retry_get(session, url, timeout=timeout)
