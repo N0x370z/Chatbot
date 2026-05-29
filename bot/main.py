@@ -41,13 +41,16 @@ async def post_init(application: Application) -> None:
     from telegram import BotCommand
     commands = [
         BotCommand("start", "Mostrar el menú principal"),
-        BotCommand("ayuda", "Mostrar instrucciones de uso"),
+        BotCommand("ayuda", "Ver todos los comandos"),
         BotCommand("libro", "Buscar un libro por título o autor"),
         BotCommand("fuente", "Cambiar la fuente de búsqueda de libros"),
-        BotCommand("convertir", "Activar/desactivar conversión a EPUB/MOBI"),
-        BotCommand("jobs", "Ver tus descargas en curso"),
-        BotCommand("cancelar", "Cancelar tu descarga más reciente"),
-        BotCommand("estado", "Ver estado y caché del bot"),
+        BotCommand("convertir", "Convertir PDF/EPUB subido a otro formato"),
+        BotCommand("audio", "Descargar audio desde una URL"),
+        BotCommand("video", "Descargar video desde una URL"),
+        BotCommand("formato_audio", "Cambiar formato de audio (MP3/M4A/OPUS/FLAC)"),
+        BotCommand("jobs", "Ver el estado de tus descargas"),
+        BotCommand("cancelar", "Cancelar la última descarga pendiente"),
+        BotCommand("estado", "Ver tus preferencias actuales"),
         BotCommand("version", "Mostrar la versión del bot"),
     ]
     await application.bot.set_my_commands(commands)
