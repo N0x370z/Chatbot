@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import html as _html
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -109,22 +110,18 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"Actual: <b>{_AUDIO_FMTS.get(current, current)}</b>\n\n"
             "Elige el formato para las próximas descargas de audio:"
         )
-        try:
+        with contextlib.suppress(Exception):
             await query.edit_message_text(text=text, reply_markup=markup, parse_mode="HTML")
-        except Exception:
-            pass
         return
 
     # ── Volver al menú ───────────────────────────────────────────────────────
     if action == "back":
-        try:
+        with contextlib.suppress(Exception):
             await query.edit_message_text(
                 text=WELCOME_HTML,
                 reply_markup=main_menu_markup(),
                 parse_mode="HTML",
             )
-        except Exception:
-            pass
         return
 
     # ── Hints de comandos ────────────────────────────────────────────────────
