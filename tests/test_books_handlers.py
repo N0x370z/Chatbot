@@ -3,7 +3,7 @@
 import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
+
 from telegram import Update
 
 from bot.config import Settings
@@ -88,13 +88,13 @@ def test_cmd_libro_default_standard_ebooks() -> None:
     ctx = _make_context(args=["el", "quijote"])
 
     mock_results = [BookResult(id="1", title="Don Quijote")]
-    
+
     async def mock_search_func(*args, **kwargs):
         return mock_results
 
     with patch("bot.handlers.books.search_standard_ebooks", side_effect=mock_search_func) as mock_search:
         asyncio.run(cmd_libro(update, ctx))
-        
+
         mock_search.assert_called_once()
         assert ctx.user_data["books_pending"] == [
             {"id": "1", "title": "Don Quijote", "source": "standard_ebooks"}

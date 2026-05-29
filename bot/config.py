@@ -126,7 +126,7 @@ def get_settings() -> Settings:
         maybe_path = Path(calibre_str).expanduser().resolve()
         if maybe_path.exists():
             calibre_library_path = maybe_path
-            
+
     ssl_verify_raw = os.environ.get("SSL_VERIFY", "true").strip().lower()
     ssl_verify = ssl_verify_raw not in ("0", "false", "f", "no", "n")
 

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from urllib.parse import urlencode
 
 import aiohttp
 
+from bot.services._book_validation import validate_book_bytes
 from bot.services.books_api import BookResult, BooksApiError
 from bot.services.http_utils import _retry_get
-from bot.services._book_validation import validate_book_bytes
 
 logger = logging.getLogger(__name__)
 GUTENDEX_SEARCH_URL = "https://gutendex.com/books"
@@ -37,7 +36,7 @@ async def search_gutenberg(
         resp = await _retry_get(session, url, timeout=timeout)
         resp.raise_for_status()
         payload = await resp.json(content_type=None)
-    except asyncio.TimeoutError as e:
+    except TimeoutError as e:
         logger.warning("gutenberg timeout: %s", e)
         raise BooksApiError("Gutenberg tardó demasiado en responder.") from e
     except aiohttp.ClientError as e:
@@ -85,7 +84,7 @@ async def download_gutenberg(
         resp = await _retry_get(session, url)
         resp.raise_for_status()
         payload = await resp.json(content_type=None)
-    except asyncio.TimeoutError as e:
+    except TimeoutError as e:
         logger.warning("gutenberg metadata timeout: %s", e)
         raise BooksApiError("Gutenberg tardó demasiado en responder.") from e
     except aiohttp.ClientError as e:

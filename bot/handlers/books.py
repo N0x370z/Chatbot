@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import html
 import io
 import logging
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 BOOK_PREFIX = "book:"
 BOOK_SOURCES = ("gutenberg", "libgen", "open_library", "dbooks", "internet_archive", "standard_ebooks")
-FALLBACK_CHAIN = ("standard_ebooks", "gutenberg", "internet_archive", "dbooks")
+FALLBACK_CHAIN = ("standard_ebooks", "gutenberg", "internet_archive", "dbooks", "libgen")
 SOURCE_LABELS = {
     "gutenberg": "Gutenberg",
     "libgen": "Libgen",
@@ -165,10 +166,8 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             )
         await status_msg.delete()
         stats_from(context).mark_download(ok=True)
-        try:
+        with contextlib.suppress(OSError):
             output_path.unlink(missing_ok=True)
-        except OSError:
-            pass
     except Exception as exc:
         from bot.utils.converter import ConversionError
         stats_from(context).mark_download(ok=False)
@@ -225,10 +224,7 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     session = http_session_from(context)
     book_source = context.user_data.get("book_source")
     if book_source not in BOOK_SOURCES:
-        if settings.books_api_enabled:
-            book_source = "api"
-        else:
-            book_source = "standard_ebooks"
+        book_source = "api" if settings.books_api_enabled else "standard_ebooks"
 
     cache = context.application.bot_data.get("book_search_cache")
     if cache is None:
@@ -311,19 +307,15 @@ async def on_book_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     pending = context.user_data.get("books_pending")
     if not isinstance(pending, list):
-        try:
+        with contextlib.suppress(Exception):
             await query.edit_message_text("Resultados expirados. Busca de nuevo.")
-        except Exception:
-            pass
         return
 
     settings = settings_from(context)
     keyboard = _build_books_keyboard(pending, page, settings.books_api_max_results)
 
-    try:
+    with contextlib.suppress(Exception):
         await query.edit_message_reply_markup(reply_markup=keyboard)
-    except Exception:
-        pass
 
 
 async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -357,7 +349,7 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     settings = settings_from(context)
     stats = stats_from(context)
     session = http_session_from(context)
-    source = str(item.get("source", context.user_data.get("books_source", "api")))
+    source = str(item.get("source", context.user_data.get("book_source", "api")))
 
     if source == "open_library":
         await query.message.reply_text(

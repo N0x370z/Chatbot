@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import html
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from bot.deps import queue_from, stats_from
-from bot.handlers import admin, audio, books, menu, uploads, video, estado, url_detect
+from bot.handlers import admin, audio, books, estado, menu, uploads, url_detect, video
 from bot.texts import HELP_HTML
 
 
@@ -29,6 +31,15 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text("pong")
 
 
+_STATUS_EMOJI: dict[str, str] = {
+    "queued": "⏳",
+    "running": "🔄",
+    "done": "✅",
+    "failed": "❌",
+}
+_KIND_LABEL: dict[str, str] = {"audio": "Audio", "video": "Video", "apple": "M4A"}
+
+
 async def cmd_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     stats_from(context).mark_command("jobs", user.id if user else None)
@@ -38,13 +49,17 @@ async def cmd_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not jobs:
         await update.effective_message.reply_text("No tienes trabajos recientes.")
         return
-    lines = []
+    lines = ["<b>📋 Mis trabajos recientes</b>"]
     for job in jobs:
-        line = f"#{job.id} {job.kind} [{job.status}]"
+        emoji = _STATUS_EMOJI.get(job.status, "•")
+        kind = _KIND_LABEL.get(job.kind, job.kind)
+        line = f"{emoji} <code>#{job.id}</code> {kind}"
+        if job.status == "running" and job.retry_count > 0:
+            line += f" — intento {job.retry_count + 1}"
         if job.error:
-            line += f" - {job.error}"
+            line += f"\n   ↳ {html.escape(job.error[:100])}"
         lines.append(line)
-    await update.effective_message.reply_text("\n".join(lines))
+    await update.effective_message.reply_html("\n".join(lines))
 
 
 async def cmd_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -52,7 +67,7 @@ async def cmd_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     stats_from(context).mark_command("cancelar", user.id if user else None)
     if user is None or not update.effective_message:
         return
-        
+
     queue = queue_from(context)
     jobs = queue.jobs_for_user(user.id)
     queued_jobs = [j for j in jobs if j.status == "queued"]

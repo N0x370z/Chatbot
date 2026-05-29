@@ -69,6 +69,10 @@ class DownloadQueue:
         """Clave única para cachear el file_id en la DB."""
         return f"media:{job.kind}:{job.audio_format}:{job.url}"
 
+    def shutdown(self) -> None:
+        if self._worker_task is not None and not self._worker_task.done():
+            self._worker_task.cancel()
+
     def ensure_started(self, application: Application) -> None:
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = application.create_task(self._worker(application))
@@ -83,6 +87,8 @@ class DownloadQueue:
         user_id: int,
         audio_format: str = "mp3",
     ) -> DownloadJob:
+        if not url.lower().startswith(("http://", "https://")):
+            raise ValueError("URL no válida. Solo se aceptan URLs http o https.")
         if self._queue.full():
             raise ValueError("La cola de descargas está llena. Intenta más tarde.")
         self.ensure_started(application)

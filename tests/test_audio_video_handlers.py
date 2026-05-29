@@ -7,15 +7,13 @@ from telegram import Update
 
 from bot.handlers.audio import (
     AUDIO_FMT_PREFIX,
-    VALID_AUDIO_FMTS,
-    cmd_audio,
     cmd_apple,
+    cmd_audio,
     cmd_formato_audio,
     on_audio_fmt_pick,
 )
 from bot.handlers.video import cmd_video
 from bot.state import BotStats, RateLimiter
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Fixtures / helpers

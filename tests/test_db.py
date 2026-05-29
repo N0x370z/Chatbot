@@ -1,11 +1,12 @@
 """Tests for the SQLite database."""
 
 import asyncio
-import pytest
-import sqlite3
 from pathlib import Path
 
+import pytest
+
 from bot.db import Database
+
 
 @pytest.fixture
 def temp_db(tmp_path: Path) -> Database:
@@ -14,10 +15,10 @@ def temp_db(tmp_path: Path) -> Database:
 
 def test_file_cache(temp_db: Database) -> None:
     assert asyncio.run(temp_db.get_file_id("nonexistent")) is None
-    
+
     asyncio.run(temp_db.set_file_id("key1", "file_abc123"))
     assert asyncio.run(temp_db.get_file_id("key1")) == "file_abc123"
-    
+
     # Overwrite
     asyncio.run(temp_db.set_file_id("key1", "file_xyz789"))
     assert asyncio.run(temp_db.get_file_id("key1")) == "file_xyz789"

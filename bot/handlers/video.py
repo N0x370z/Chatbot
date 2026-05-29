@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-import asyncio
 
 from bot.deps import limiter_from, queue_from, stats_from
 from bot.services.ytdlp_download import extract_playlist
@@ -42,7 +43,7 @@ async def cmd_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not urls:
         await msg.edit_text("❌ No se encontró contenido en el enlace.")
         return
-        
+
     urls = urls[:50]
     queue = queue_from(context)
     jobs = []
@@ -55,7 +56,7 @@ async def cmd_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             user_id=user_id,
         )
         jobs.append(job)
-        
+
     if len(jobs) == 1:
         await msg.edit_text(f"Trabajo en cola: #{jobs[0].id} (video). Usa /jobs para ver estado.")
     else:

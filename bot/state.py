@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict, deque
+import time
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-import time
 
 
 @dataclass
@@ -45,15 +45,22 @@ class RateLimiter:
     def __init__(self, *, window_seconds: int, max_requests: int) -> None:
         self.window_seconds = window_seconds
         self.max_requests = max_requests
-        self._events: dict[int, deque[float]] = defaultdict(deque)
+        self._events: dict[int, deque[float]] = {}
 
     def allow(self, user_id: int) -> bool:
         now = time.monotonic()
-        q = self._events[user_id]
         threshold = now - float(self.window_seconds)
-        while q and q[0] < threshold:
-            q.popleft()
-        if len(q) >= self.max_requests:
+        q = self._events.get(user_id)
+        if q is not None:
+            while q and q[0] < threshold:
+                q.popleft()
+            if not q:
+                del self._events[user_id]
+                q = None
+        if q is not None and len(q) >= self.max_requests:
             return False
+        if q is None:
+            q = deque()
+            self._events[user_id] = q
         q.append(now)
         return True

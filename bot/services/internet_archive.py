@@ -7,15 +7,14 @@ API pública, sin clave. Documentación:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from urllib.parse import urlencode
 
 import aiohttp
 
-from bot.services.books_api import BookResult, BooksApiError
 from bot.services._book_validation import validate_book_bytes
+from bot.services.books_api import BookResult, BooksApiError
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,7 @@ async def search_internet_archive(
         async with session.get(url, timeout=timeout) as resp:
             resp.raise_for_status()
             payload = await resp.json(content_type=None)
-    except asyncio.TimeoutError as e:
+    except TimeoutError as e:
         logger.warning("internet archive search timeout: %s", e)
         raise BooksApiError("Internet Archive tardó demasiado en responder.") from e
     except aiohttp.ClientError as e:

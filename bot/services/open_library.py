@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from urllib.parse import urlencode
 
@@ -30,7 +29,7 @@ async def search_open_library(
         resp = await _retry_get(session, url, timeout=timeout)
         resp.raise_for_status()
         payload = await resp.json(content_type=None)
-    except asyncio.TimeoutError as e:
+    except TimeoutError as e:
         logger.warning("open library timeout: %s", e)
         raise BooksApiError(
             "Open Library tardó demasiado. Prueba con /fuente gutenberg o /fuente libgen"

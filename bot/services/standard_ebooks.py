@@ -10,19 +10,18 @@ completo es pequeño: ~750 entradas, cargado en su totalidad de una vez).
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import xml.etree.ElementTree as ET
 
 import aiohttp
 
-from bot.services.books_api import BookResult, BooksApiError
 from bot.services._book_validation import validate_book_bytes
+from bot.services.books_api import BookResult, BooksApiError
 
 logger = logging.getLogger(__name__)
 
-_OPDS_URL = "https://standardebooks.org/feeds/opds"
+_OPDS_URL = "https://standardebooks.org/feeds/opds/all"
 _NS = {
     "atom": "http://www.w3.org/2005/Atom",
     "dc": "http://purl.org/dc/terms/",
@@ -98,7 +97,7 @@ async def search_standard_ebooks(
         async with session.get(_OPDS_URL, timeout=timeout) as resp:
             resp.raise_for_status()
             xml_bytes = await resp.read()
-    except asyncio.TimeoutError as e:
+    except TimeoutError as e:
         logger.warning("standard ebooks timeout: %s", e)
         raise BooksApiError("Standard Ebooks tardó demasiado en responder.") from e
     except aiohttp.ClientError as e:

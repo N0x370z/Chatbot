@@ -41,13 +41,16 @@ async def post_init(application: Application) -> None:
     from telegram import BotCommand
     commands = [
         BotCommand("start", "Mostrar el menú principal"),
-        BotCommand("ayuda", "Mostrar instrucciones de uso"),
+        BotCommand("ayuda", "Ver todos los comandos"),
         BotCommand("libro", "Buscar un libro por título o autor"),
         BotCommand("fuente", "Cambiar la fuente de búsqueda de libros"),
-        BotCommand("convertir", "Activar/desactivar conversión a EPUB/MOBI"),
-        BotCommand("jobs", "Ver tus descargas en curso"),
-        BotCommand("cancelar", "Cancelar tu descarga más reciente"),
-        BotCommand("estado", "Ver estado y caché del bot"),
+        BotCommand("convertir", "Convertir PDF/EPUB subido a otro formato"),
+        BotCommand("audio", "Descargar audio desde una URL"),
+        BotCommand("video", "Descargar video desde una URL"),
+        BotCommand("formato_audio", "Cambiar formato de audio (MP3/M4A/OPUS/FLAC)"),
+        BotCommand("jobs", "Ver el estado de tus descargas"),
+        BotCommand("cancelar", "Cancelar la última descarga pendiente"),
+        BotCommand("estado", "Ver tus preferencias actuales"),
         BotCommand("version", "Mostrar la versión del bot"),
     ]
     await application.bot.set_my_commands(commands)
@@ -56,10 +59,10 @@ async def post_shutdown(application: Application) -> None:
     session: aiohttp.ClientSession | None = application.bot_data.get("http_session")
     if session is not None and not session.closed:
         await session.close()
-    
+
     queue = application.bot_data.get("download_queue")
-    if queue is not None and queue._worker_task is not None:
-        queue._worker_task.cancel()
+    if queue is not None:
+        queue.shutdown()
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -107,10 +110,10 @@ async def on_any_update(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         chat = getattr(update, "effective_chat", None)
         message = getattr(update, "effective_message", None)
         logger.info(
-            "Update recibido: user_id=%s chat_id=%s text=%s",
+            "Update recibido: user_id=%s chat_id=%s has_text=%s",
             user.id if user else None,
             chat.id if chat else None,
-            message.text if message else None,
+            message is not None and bool(message.text),
         )
         if user:
             from bot.deps import db_from
@@ -150,7 +153,7 @@ def main() -> None:
         settings=settings,
         stats=stats,
     )
-    
+
     db_path = settings.download_path / "bot.sqlite"
     application.bot_data["db"] = Database(db_path)
 

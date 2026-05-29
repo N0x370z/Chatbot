@@ -7,14 +7,13 @@ from unittest.mock import AsyncMock, MagicMock
 from telegram import Message, Update
 
 from bot.handlers.url_detect import (
+    URL_ACTION_PREFIX,
     _extract_url,
     _is_audio_domain,
-    on_url_message,
     on_url_action,
-    URL_ACTION_PREFIX,
+    on_url_message,
 )
 from bot.state import BotStats, RateLimiter
-
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

@@ -1,8 +1,10 @@
 """Tests de validación de magic bytes para libros."""
 
 import pytest
+
 from bot.services._book_validation import detect_book_type, validate_book_bytes
 from bot.services.books_api import BooksApiError
+
 
 def test_detect_book_type_pdf():
     data = b"%PDF-1.4\n..."

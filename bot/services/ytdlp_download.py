@@ -5,6 +5,7 @@ Los handlers deben usar asyncio.to_thread() para no bloquear el event loop.
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import uuid
 from pathlib import Path
@@ -82,16 +83,15 @@ def _validate_media(path: Path, *, min_bytes: int, min_duration: float | None, i
             f"Archivo demasiado pequeño ({size} bytes). Puede estar corrupto."
         )
     duration = info.get("duration")
-    if min_duration is not None and duration is not None:
-        if float(duration) < min_duration:
-            raise DownloadQualityError(
-                f"Contenido demasiado corto ({duration:.0f}s). Mínimo {min_duration:.0f}s."
-            )
+    if min_duration is not None and duration is not None and float(duration) < min_duration:
+        raise DownloadQualityError(
+            f"Contenido demasiado corto ({duration:.0f}s). Mínimo {min_duration:.0f}s."
+        )
 
 
 def _make_progress_hook(bot, chat_id, message_id, loop, job=None):
-    import time
     import asyncio
+    import time
     last_edit = [time.time()]
     def hook(d: dict):
         if job is not None and getattr(job, "cancel_requested", False):
@@ -103,13 +103,11 @@ def _make_progress_hook(bot, chat_id, message_id, loop, job=None):
             if now - last_edit[0] > 10.0:
                 last_edit[0] = now
                 pct = d.get("_percent_str", "0%").strip()
-                try:
+                with contextlib.suppress(Exception):
                     asyncio.run_coroutine_threadsafe(
                         bot.edit_message_text(f"Descargando... {pct}", chat_id=chat_id, message_id=message_id),
                         loop
                     )
-                except Exception:
-                    pass
     return hook
 
 
@@ -249,10 +247,8 @@ def download_audio_format(url: str, settings: Settings, fmt: str, bot=None, chat
 
 def cleanup_download(path: Path) -> None:
     """Borra el archivo descargado y la carpeta de trabajo (uuid bajo DOWNLOAD_PATH)."""
-    try:
+    with contextlib.suppress(OSError):
         shutil.rmtree(path.parent, ignore_errors=True)
-    except OSError:
-        pass
 
 
 def extract_playlist(url: str) -> list[str]:

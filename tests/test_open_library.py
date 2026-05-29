@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
+
 import aiohttp
+import pytest
+
 from bot.services.books_api import BooksApiError
 from bot.services.open_library import search_open_library
 
@@ -74,7 +76,7 @@ def test_search_open_library_empty() -> None:
 
 
 def test_search_open_library_timeout() -> None:
-    session = DummySession([asyncio.TimeoutError(), asyncio.TimeoutError(), asyncio.TimeoutError()])
+    session = DummySession([TimeoutError(), TimeoutError(), TimeoutError()])
     with pytest.raises(BooksApiError, match="Open Library tardó demasiado."):
         asyncio.run(search_open_library(session, "test", 5))
 

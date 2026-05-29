@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from telegram import Document, Update
@@ -58,7 +58,7 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     extension = Path(document.file_name or "").suffix.lower()
     mime_type = (document.mime_type or "").lower()
-    
+
     if (extension == ".pdf" and mime_type == "application/epub+zip") or (extension == ".epub" and mime_type == "application/pdf"):
         warning_msg = f"Advertencia: la extensión del archivo ({extension}) no coincide con su tipo detectado ({mime_type})."
         logger.warning("Mismatch de extensión/MIME: nombre=%s mime=%s", document.file_name, mime_type)
@@ -76,19 +76,19 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
 
-    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
     safe_name = _safe_name(document.file_name, fallback=f"upload_{document.file_unique_id}")
     target = settings.incoming_files_path / f"{ts}_{safe_name}"
     tg_file = await document.get_file()
     await tg_file.download_to_drive(custom_path=str(target))
-    
+
     if not _verify_file_integrity(target, extension):
         target.unlink(missing_ok=True)
         logger.warning("Integridad de archivo fallida: user_id=%s file=%s", user.id if user else "unknown", target)
         await message.reply_text("El archivo subido está corrupto o no tiene el formato correcto (no es un PDF ni EPUB válido).")
         return
 
-    await message.reply_text(f"Archivo recibido y guardado: {target}")
+    await message.reply_text(f"Archivo recibido: {target.name}")
     context.user_data["last_uploaded_file"] = str(target)
     logger.info(
         "Archivo guardado: user_id=%s name=%s size=%s path=%s",

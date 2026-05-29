@@ -1,11 +1,13 @@
 """Tests for dbooks."""
 
 import asyncio
-import pytest
-import aiohttp
 from unittest.mock import Mock
 
-from bot.services.dbooks import search_dbooks, download_dbooks, BooksApiError
+import aiohttp
+import pytest
+
+from bot.services.dbooks import BooksApiError, download_dbooks, search_dbooks
+
 
 class DummyResponse:
     def __init__(self, payload=None, status=200, content_length=None, content=b""):
@@ -65,7 +67,7 @@ def test_search_dbooks_success():
 
 
 def test_search_dbooks_timeout():
-    session = DummySession([asyncio.TimeoutError()])
+    session = DummySession([TimeoutError()])
     with pytest.raises(BooksApiError, match="dBooks tardó demasiado en responder."):
         asyncio.run(search_dbooks(session, "linux", 5))
 

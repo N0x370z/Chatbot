@@ -1,16 +1,17 @@
 """Tests for Standard Ebooks service."""
 
 import asyncio
-import pytest
 from unittest.mock import Mock
+
 import aiohttp
+import pytest
 
 from bot.services.standard_ebooks import (
-    search_standard_ebooks,
-    download_standard_ebooks,
+    BooksApiError,
     _parse_opds,
     _safe_filename,
-    BooksApiError,
+    download_standard_ebooks,
+    search_standard_ebooks,
 )
 
 # Minimal OPDS XML feed
@@ -126,7 +127,7 @@ def test_search_standard_ebooks_success():
 
 
 def test_search_standard_ebooks_timeout():
-    session = DummySession([asyncio.TimeoutError()])
+    session = DummySession([TimeoutError()])
     with pytest.raises(BooksApiError, match="Standard Ebooks tardó demasiado"):
         asyncio.run(search_standard_ebooks(session, "moby", 5))
 

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
+
 import aiohttp
+import pytest
+
 from bot.services.books_api import BooksApiError
 from bot.services.gutenberg import search_gutenberg
 
@@ -74,7 +76,7 @@ def test_search_gutenberg_empty() -> None:
 
 
 def test_search_gutenberg_timeout() -> None:
-    session = DummySession([asyncio.TimeoutError(), asyncio.TimeoutError(), asyncio.TimeoutError()])
+    session = DummySession([TimeoutError(), TimeoutError(), TimeoutError()])
     with pytest.raises(BooksApiError, match="Gutenberg tardó demasiado en responder."):
         asyncio.run(search_gutenberg(session, "test", 5))
 

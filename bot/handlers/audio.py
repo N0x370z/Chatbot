@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
-import asyncio
 
 from bot.deps import limiter_from, queue_from, stats_from
 from bot.services.ytdlp_download import extract_playlist
@@ -40,13 +41,13 @@ async def cmd_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
     fmt = context.user_data.get("audio_format", "mp3")
-    
+
     msg = await update.effective_message.reply_text("🔎 Analizando enlace...")
     urls = await asyncio.to_thread(extract_playlist, url)
     if not urls:
         await msg.edit_text("❌ No se encontró contenido en el enlace.")
         return
-        
+
     urls = urls[:50]
     queue = queue_from(context)
     jobs = []
@@ -60,7 +61,7 @@ async def cmd_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             audio_format=fmt,
         )
         jobs.append(job)
-        
+
     if len(jobs) == 1:
         await msg.edit_text(f"Trabajo en cola: #{jobs[0].id} (audio/{fmt.upper()}). Usa /jobs para ver estado.")
     else:
@@ -95,7 +96,7 @@ async def cmd_apple(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not urls:
         await msg.edit_text("❌ No se encontró contenido en el enlace.")
         return
-        
+
     urls = urls[:50]
     queue = queue_from(context)
     jobs = []
@@ -108,7 +109,7 @@ async def cmd_apple(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             user_id=user_id,
         )
         jobs.append(job)
-        
+
     if len(jobs) == 1:
         await msg.edit_text(f"Trabajo en cola: #{jobs[0].id} (apple). Usa /jobs para ver estado.")
     else:
