@@ -63,7 +63,7 @@ def test_libgen_domain_validation_rejects_subdomain_hijack():
 
 def test_libgen_domain_validation_accepts_valid():
     from unittest.mock import patch
-    valid_url = "https://libgen.is/get.php?md5=abc"
+    valid_url = "https://libgen.li/get.php?md5=abc"
 
     class DummyResponse:
         async def __aenter__(self): return self

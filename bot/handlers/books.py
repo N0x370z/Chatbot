@@ -349,7 +349,7 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     settings = settings_from(context)
     stats = stats_from(context)
     session = http_session_from(context)
-    source = str(item.get("source", context.user_data.get("books_source", "api")))
+    source = str(item.get("source", context.user_data.get("book_source", "api")))
 
     if source == "open_library":
         await query.message.reply_text(

@@ -172,9 +172,16 @@ async def download_libgen(
     download_url = book_id
 
     if is_intermediate:
+        _intermediate_allowed = ["library.lol", "libgen.lol", "libgen.rocks", "libgen.li"]
+        parsed_intermediate = urlparse(book_id)
+        if not any(
+            parsed_intermediate.netloc == d or parsed_intermediate.netloc.endswith("." + d)
+            for d in _intermediate_allowed
+        ):
+            raise BooksApiError(f"Dominio intermediario no permitido: {parsed_intermediate.netloc}")
+
         # Paso 2: hacer GET a la página intermedia y extraer link real
         try:
-            # Usar SSL bypass para intermediate pages si es libgen.li
             connector = aiohttp.TCPConnector(ssl=settings.ssl_verify) if "libgen.li" in book_id else None
             async with aiohttp.ClientSession(connector=connector) as tmp_session, tmp_session.get(book_id, timeout=timeout_page) as resp:
                 resp.raise_for_status()
@@ -206,7 +213,7 @@ async def download_libgen(
             download_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", download_url)
 
     # Paso 3: descargar el archivo real
-    allowed_domains = ["libgen.li", "libgen.is", "libgen.rs", "libgen.st"]
+    allowed_domains = ["libgen.li"]
     parsed_download_url = urlparse(download_url)
 
     if not any(

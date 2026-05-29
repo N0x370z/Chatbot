@@ -25,6 +25,9 @@ class DummyResponse:
     def __init__(self, status):
         self.status = status
 
+    async def release(self):
+        pass
+
     def raise_for_status(self):
         if self.status >= 400:
             req_info = Mock()

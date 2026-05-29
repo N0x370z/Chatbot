@@ -58,8 +58,8 @@ async def post_shutdown(application: Application) -> None:
         await session.close()
 
     queue = application.bot_data.get("download_queue")
-    if queue is not None and queue._worker_task is not None:
-        queue._worker_task.cancel()
+    if queue is not None:
+        queue.shutdown()
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -107,10 +107,10 @@ async def on_any_update(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         chat = getattr(update, "effective_chat", None)
         message = getattr(update, "effective_message", None)
         logger.info(
-            "Update recibido: user_id=%s chat_id=%s text=%s",
+            "Update recibido: user_id=%s chat_id=%s has_text=%s",
             user.id if user else None,
             chat.id if chat else None,
-            message.text if message else None,
+            message is not None and bool(message.text),
         )
         if user:
             from bot.deps import db_from

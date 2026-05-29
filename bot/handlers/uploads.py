@@ -88,7 +88,7 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await message.reply_text("El archivo subido está corrupto o no tiene el formato correcto (no es un PDF ni EPUB válido).")
         return
 
-    await message.reply_text(f"Archivo recibido y guardado: {target}")
+    await message.reply_text(f"Archivo recibido: {target.name}")
     context.user_data["last_uploaded_file"] = str(target)
     logger.info(
         "Archivo guardado: user_id=%s name=%s size=%s path=%s",
