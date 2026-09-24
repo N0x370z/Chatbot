@@ -3,6 +3,7 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from telegram import Update
 
 from bot.handlers.audio import (
@@ -14,6 +15,12 @@ from bot.handlers.audio import (
 )
 from bot.handlers.video import cmd_video
 from bot.state import BotStats, RateLimiter
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """extract_playlist consultaría YouTube: se sustituye por un eco de la URL."""
+    monkeypatch.setattr("bot.services.ytdlp_download.extract_playlist", lambda url: [url])
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Fixtures / helpers
@@ -37,6 +44,7 @@ def _make_context(url: str | None = None, fmt: str = "mp3") -> MagicMock:
     app.bot_data["download_queue"].enqueue = AsyncMock(
         return_value=MagicMock(id="aabbccdd")
     )
+    app.bot_data["download_queue"].free_slots = MagicMock(return_value=20)
     ctx.application = app
     return ctx
 
@@ -186,3 +194,20 @@ def test_on_audio_fmt_pick_invalid():
     # Should not update user_data or send any message
     assert ctx.user_data.get("audio_format") == "mp3"  # unchanged
     query.edit_message_text.assert_not_called()
+
+
+def test_playlist_is_capped_to_free_queue_slots(monkeypatch):
+    """Una playlist más larga que el hueco libre encola lo que cabe y avisa."""
+    monkeypatch.setattr(
+        "bot.services.ytdlp_download.extract_playlist",
+        lambda url: [f"https://youtu.be/{i}" for i in range(30)],
+    )
+    update = _make_update()
+    ctx = _make_context(url="https://youtube.com/playlist?list=x")
+    ctx.application.bot_data["download_queue"].free_slots.return_value = 5
+
+    asyncio.run(cmd_audio(update, ctx))
+
+    assert ctx.application.bot_data["download_queue"].enqueue.await_count == 5
+    status = update.effective_message.reply_text.return_value
+    assert "Se omitieron 25" in status.edit_text.call_args[0][0]

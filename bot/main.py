@@ -26,11 +26,9 @@ logger = logging.getLogger(__name__)
 
 async def post_init(application: Application) -> None:
     settings: Settings = application.bot_data["settings"]
+    # La clave de BOOKS_API_KEY la añade books_api solo a sus peticiones: si
+    # fuera una cabecera de la sesión, se enviaría a todas las fuentes públicas.
     headers = {"User-Agent": "TelegramMediaBot/1.0"}
-    if settings.books_api_key:
-        key_prefix = settings.books_api_key_prefix
-        key_value = f"{key_prefix} {settings.books_api_key}".strip() if key_prefix else settings.books_api_key
-        headers[settings.books_api_key_header] = key_value
     timeout = aiohttp.ClientTimeout(total=settings.books_api_timeout_sec)
     connector = aiohttp.TCPConnector(ssl=settings.ssl_verify)
     application.bot_data["http_session"] = aiohttp.ClientSession(

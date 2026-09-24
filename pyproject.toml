@@ -13,3 +13,10 @@ ignore = ["E501"]
 [tool.pyright]
 include = ["bot", "src", "tests", "main.py", "main_worker.py"]
 extraPaths = ["."]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: pruebas contra APIs reales (requieren red; make test-live)"]
+addopts = "-m 'not live'"
+# Un coroutine que nunca se espera suele ser un bug real (tarea perdida).
+filterwarnings = ["error:coroutine .* was never awaited:RuntimeWarning"]

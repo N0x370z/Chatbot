@@ -89,8 +89,16 @@ def test_verify_integrity_missing_file(tmp_path):
     assert _verify_file_integrity(f, ".pdf") is False
 
 
-def test_verify_integrity_unknown_extension(tmp_path):
-    f = tmp_path / "doc.mobi"
-    f.write_bytes(b"MOBI content")
-    # Unknown extension returns True (no check defined)
-    assert _verify_file_integrity(f, ".mobi") is True
+def test_verify_integrity_rejects_mismatch(tmp_path):
+    # Un EPUB renombrado a .pdf (o cualquier extensión no admitida) no pasa.
+    f = tmp_path / "book.pdf"
+    f.write_bytes(b"PK\x03\x04 epub")
+    assert _verify_file_integrity(f, ".pdf") is False
+    assert _verify_file_integrity(f, ".mobi") is False
+
+
+def test_is_supported_uses_mime_when_extension_is_unknown():
+    from bot.handlers.uploads import _book_extension
+
+    assert _book_extension(_doc(file_name="libro.bin", mime_type="application/pdf")) == ".pdf"
+    assert _book_extension(_doc(file_name="libro.EPUB")) == ".epub"

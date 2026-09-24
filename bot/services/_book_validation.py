@@ -7,7 +7,7 @@ Uso:
 
 from __future__ import annotations
 
-from bot.services.books_api import BooksApiError
+from bot.services.base import BooksApiError
 
 
 def detect_book_type(data: bytes) -> str | None:

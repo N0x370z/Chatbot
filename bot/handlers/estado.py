@@ -5,13 +5,16 @@ import html
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
+from bot.services.sources import DEFAULT_SOURCE, SOURCES
+
 
 async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     if not msg:
         return
 
-    book_source = context.user_data.get("book_source", "standard_ebooks")
+    book_source = context.user_data.get("book_source", DEFAULT_SOURCE)
+    book_source = SOURCES[book_source].label if book_source in SOURCES else book_source
     audio_format = context.user_data.get("audio_format", "mp3")
     last_uploaded = context.user_data.get("last_uploaded_file", "ninguno")
 

@@ -262,7 +262,7 @@ def test_enqueue_normal_and_full(tmp_path: Path):
     stats = BotStats()
     q = DownloadQueue(settings=_make_settings(tmp_path), stats=stats)
     app = MagicMock()
-    app.create_task = MagicMock()
+    app.create_task = MagicMock(side_effect=lambda coro: coro.close())  # sin worker real
 
     for i in range(20):
         asyncio.run(q.enqueue(app, kind="audio", url=f"http://test/{i}", chat_id=1, user_id=1))
@@ -285,3 +285,28 @@ def test_run_job_respects_cancel_requested(tmp_path: Path):
 
     assert job.status == "failed"
     assert job.error == "Cancelado por el usuario"
+
+
+def test_worker_survives_unexpected_error(tmp_path: Path):
+    """Un error no previsto (p. ej. Telegram caído) falla el trabajo y avisa,
+    pero el worker sigue atendiendo la cola."""
+    from telegram.error import NetworkError
+
+    q = DownloadQueue(settings=_make_settings(tmp_path), stats=BotStats())
+
+    async def scenario():
+        app = MagicMock()
+        app.bot = AsyncMock()
+        app.bot_data = {}
+        app.create_task = lambda coro: asyncio.get_running_loop().create_task(coro)
+        with patch.object(DownloadQueue, "_run_job", AsyncMock(side_effect=[NetworkError("x"), None])):
+            first = await q.enqueue(app, kind="video", url="https://a", chat_id=1, user_id=1)
+            await q.enqueue(app, kind="video", url="https://b", chat_id=1, user_id=1)
+            await asyncio.wait_for(q._queue.join(), timeout=1)
+        assert not q._worker_task.done()
+        q.shutdown()
+        return first, app
+
+    first, app = asyncio.run(scenario())
+    assert first.status == "failed"
+    assert "inesperado" in app.bot.send_message.call_args.kwargs["text"]

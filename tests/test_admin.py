@@ -82,3 +82,32 @@ def test_cmd_broadcast_admin_success(mock_update, mock_context, mock_db):
     assert mock_context.bot.send_message.call_count == 2
     mock_update.effective_message.reply_text.assert_any_call("Enviando broadcast...")
     mock_update.effective_message.reply_text.assert_any_call("Broadcast enviado a 2 usuarios de 2.")
+
+
+def test_cmd_diagnostico_runs_real_source_searches(mock_update, mock_context, monkeypatch):
+    """/diagnostico usa la búsqueda de cada fuente (no una petición suelta)."""
+    from bot.handlers import admin
+    from bot.services.base import BookResult, BooksApiError
+    from bot.services.sources import BookSource
+
+    async def ok(session, q, n, settings):
+        return [BookResult("1", "x")]
+
+    async def broken(session, q, n, settings):
+        raise BooksApiError("Libgen respondió con error HTTP 503.")
+
+    monkeypatch.setattr(admin, "SOURCES", {
+        "a": BookSource("a", "Fuente A", "", ok, None, "q"),
+        "b": BookSource("b", "Fuente B", "", broken, None, "q"),
+    })
+    mock_update.effective_user.id = 1
+    mock_context.application.bot_data = {"http_session": MagicMock(closed=False), "settings": object()}
+    app = MagicMock()
+    register(app, admin_user_id=1)
+    handler = next(h.callback for (h,), _ in app.add_handler.call_args_list if "diagnostico" in h.commands)
+
+    asyncio.run(handler(mock_update, mock_context))
+
+    report = mock_update.effective_message.reply_text.return_value.edit_text.call_args[0][0]
+    assert "✅ Fuente A — 1 resultados" in report
+    assert "❌ Fuente B — Libgen respondió con error HTTP 503." in report

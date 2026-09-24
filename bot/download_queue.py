@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import shutil
 from dataclasses import dataclass, field
@@ -10,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
+from telegram.error import TelegramError
 from telegram.ext import Application
 from yt_dlp.utils import DownloadError
 
@@ -37,6 +39,9 @@ JobStatus = Literal["queued", "running", "done", "failed"]
 
 # Máximo de reintentos para errores de red (DownloadError transitorio)
 _MAX_RETRIES = 3
+_QUEUE_SIZE = 20
+# Trabajos terminados que se conservan en memoria para /jobs.
+_MAX_FINISHED_JOBS = 200
 
 
 @dataclass
@@ -60,7 +65,7 @@ class DownloadQueue:
     def __init__(self, *, settings: Settings, stats: BotStats) -> None:
         self.settings = settings
         self.stats = stats
-        self._queue: asyncio.Queue[DownloadJob] = asyncio.Queue(maxsize=20)
+        self._queue: asyncio.Queue[DownloadJob] = asyncio.Queue(maxsize=_QUEUE_SIZE)
         self._jobs: dict[str, DownloadJob] = {}
         self._worker_task: asyncio.Task[None] | None = None
 
@@ -104,6 +109,17 @@ class DownloadQueue:
         await self._queue.put(job)
         return job
 
+    def free_slots(self) -> int:
+        return self._queue.maxsize - self._queue.qsize()
+
+    def _prune_finished(self) -> None:
+        finished = [j for j in self._jobs.values() if j.status in ("done", "failed")]
+        if len(finished) <= _MAX_FINISHED_JOBS:
+            return
+        finished.sort(key=lambda j: j.created_at)
+        for job in finished[: len(finished) - _MAX_FINISHED_JOBS]:
+            del self._jobs[job.id]
+
     def jobs_for_user(self, user_id: int, *, limit: int = 8) -> list[DownloadJob]:
         jobs = [j for j in self._jobs.values() if j.user_id == user_id]
         jobs.sort(key=lambda j: j.created_at, reverse=True)
@@ -112,9 +128,31 @@ class DownloadQueue:
     async def _worker(self, application: Application) -> None:
         while True:
             job = await self._queue.get()
-            if job.status != "failed" and not job.cancel_requested:
-                await self._run_job(application, job)
-            self._queue.task_done()
+            try:
+                if job.status != "failed" and not job.cancel_requested:
+                    await self._run_job(application, job)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Un fallo inesperado (p. ej. Telegram caído al enviar) no debe
+                # matar el worker: el resto de la cola quedaría parada.
+                log.exception("Job %s: error inesperado", job.id)
+                if job.status != "failed":  # puede fallar al avisar de otro error
+                    self._fail(job, "Error inesperado durante la descarga.")
+                with contextlib.suppress(TelegramError):
+                    await application.bot.send_message(
+                        chat_id=job.chat_id,
+                        text=f"❌ La descarga #{job.id} falló por un error inesperado. Inténtalo de nuevo.",
+                    )
+            finally:
+                self._queue.task_done()
+                self._prune_finished()
+
+    def _fail(self, job: DownloadJob, error: str) -> None:
+        job.status = "failed"
+        job.error = error[:400]
+        job.finished_at = datetime.now(UTC)
+        self.stats.mark_download(ok=False)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Descarga atómica (un único intento; lanza en error)
@@ -131,6 +169,7 @@ class DownloadQueue:
         bot = application.bot
         path = None
         work_dir = None
+        msg = None
         try:
             loop = asyncio.get_running_loop()
             if job.kind in ("audio", "apple"):
@@ -150,7 +189,6 @@ class DownloadQueue:
                         download_best_audio, job.url, self.settings,
                         bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop, job=job,
                     )
-                await bot.delete_message(chat_id=job.chat_id, message_id=msg.message_id)
                 sent = await send_audio_or_document(bot, chat_id=job.chat_id, path=path)
                 if db is not None and sent is not None:
                     fid = getattr(sent.audio, "file_id", None) or getattr(sent.document, "file_id", None)
@@ -162,13 +200,16 @@ class DownloadQueue:
                     download_best_video, job.url, self.settings,
                     bot=bot, chat_id=job.chat_id, message_id=msg.message_id, loop=loop, job=job,
                 )
-                await bot.delete_message(chat_id=job.chat_id, message_id=msg.message_id)
                 sent = await send_video_or_document(bot, chat_id=job.chat_id, path=path)
                 if db is not None and sent is not None:
                     fid = getattr(sent.video, "file_id", None) or getattr(sent.document, "file_id", None)
                     if fid:
                         await db.set_file_id(cache_key, fid)
         finally:
+            if msg is not None:
+                # Si el intento falla, el mensaje "Preparando…" no debe quedarse.
+                with contextlib.suppress(TelegramError):
+                    await bot.delete_message(chat_id=job.chat_id, message_id=msg.message_id)
             if work_dir is not None and work_dir.exists():
                 shutil.rmtree(work_dir, ignore_errors=True)
             if path is not None and path.exists():
@@ -254,7 +295,8 @@ class DownloadQueue:
                 await bot.send_message(chat_id=job.chat_id, text=f"Error: {exc}")
                 return
 
-            except OSError:
+            except (OSError, TelegramError):
+                log.exception("Job %s: error al enviar", job.id)
                 job.status = "failed"
                 job.error = "Error al enviar archivo."
                 job.finished_at = datetime.now(UTC)
