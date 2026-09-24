@@ -8,7 +8,7 @@ import aiohttp
 import pytest
 
 from bot.services.books_api import BooksApiError
-from bot.services.open_library import search_open_library
+from bot.services.open_library import download_open_library, search_open_library
 
 
 class DummyResponse:
@@ -91,3 +91,60 @@ def test_search_open_library_4xx() -> None:
     session = DummySession([DummyResponse(None, status=404)])
     with pytest.raises(BooksApiError, match="No se pudo contactar Open Library."):
         asyncio.run(search_open_library(session, "test", 5))
+
+
+def test_search_open_library_filters_public_ebooks() -> None:
+    captured = {}
+
+    class CapturingSession(DummySession):
+        async def get(self, url, **kwargs):
+            captured["url"] = url
+            return await super().get(url, **kwargs)
+
+    session = CapturingSession([DummyResponse({"docs": []})])
+    asyncio.run(search_open_library(session, "quijote", 5))
+    assert "ebook_access%3Apublic" in captured["url"]
+
+
+class _IASearchResponse(DummyResponse):
+    """Respuesta usable con ``async with session.get(...)``."""
+
+
+class _CtxSession:
+    def __init__(self, responses):
+        self.responses = responses
+
+    def get(self, url, **kwargs):
+        return self.responses.pop(0)
+
+
+class _Settings:
+    max_file_size_bytes = 50 * 1024 * 1024
+
+
+def test_download_open_library_tries_ia_copies(monkeypatch) -> None:
+    payload = {"response": {"docs": [{"identifier": "bad"}, {"identifier": "good"}]}}
+    session = _CtxSession([_IASearchResponse(payload)])
+    tried = []
+
+    async def fake_ia(sess, identifier, settings):
+        tried.append(identifier)
+        if identifier == "bad":
+            raise BooksApiError("sin archivo")
+        return b"PK\x03\x04", "libro.epub"
+
+    monkeypatch.setattr("bot.services.open_library.download_internet_archive", fake_ia)
+    data, name = asyncio.run(download_open_library(session, "/works/OL503666W", _Settings()))
+    assert tried == ["bad", "good"]
+    assert name == "libro.epub"
+
+
+def test_download_open_library_no_public_copy() -> None:
+    session = _CtxSession([_IASearchResponse({"response": {"docs": []}})])
+    with pytest.raises(BooksApiError, match="no tiene una copia de descarga libre"):
+        asyncio.run(download_open_library(session, "/works/OL1W", _Settings()))
+
+
+def test_download_open_library_invalid_id() -> None:
+    with pytest.raises(BooksApiError, match="ID de Open Library inválido"):
+        asyncio.run(download_open_library(_CtxSession([]), "garbage", _Settings()))

@@ -194,3 +194,58 @@ def test_download_internet_archive_too_large():
     ])
     with pytest.raises(BooksApiError, match="supera el límite"):
         asyncio.run(download_internet_archive(session, "myid", settings))
+
+
+def test_download_internet_archive_uppercase_epub_preferred():
+    """IA reports formats as "EPUB" / "Text PDF"; EPUB must still win."""
+    meta = {
+        "metadata": {"title": "Don Quijote"},
+        "files": [
+            {"name": "book.pdf", "format": "Text PDF", "size": "20000000"},
+            {"name": "book.epub", "format": "EPUB", "size": "10000000"},
+        ],
+    }
+    session = DummySession([
+        DummyResponse(meta),
+        DummyResponse(content=b"PK\x03\x04bytes"),
+    ])
+    data, fname = asyncio.run(download_internet_archive(session, "myid", MockSettings()))
+    assert data.startswith(b"PK")
+    assert fname == "Don_Quijote.epub"
+
+
+def test_download_internet_archive_skips_private_and_oversized():
+    meta = {
+        "metadata": {"title": "Book"},
+        "files": [
+            {"name": "private.epub", "format": "EPUB", "private": "true"},
+            {"name": "huge.pdf", "format": "Text PDF", "size": str(900 * 1024 * 1024)},
+            {"name": "ok.pdf", "format": "PDF", "size": "1000"},
+        ],
+    }
+    session = DummySession([
+        DummyResponse(meta),
+        DummyResponse(content=b"%PDF-1.4"),
+    ])
+    data, fname = asyncio.run(download_internet_archive(session, "myid", MockSettings()))
+    assert data == b"%PDF-1.4"
+    assert fname.endswith(".pdf")
+    assert session.call_count == 2
+
+
+def test_download_internet_archive_falls_back_to_next_file():
+    meta = {
+        "metadata": {"title": "Book"},
+        "files": [
+            {"name": "book.epub", "format": "EPUB"},
+            {"name": "book.pdf", "format": "Text PDF"},
+        ],
+    }
+    session = DummySession([
+        DummyResponse(meta),
+        DummyResponse(status=403),
+        DummyResponse(content=b"%PDF-1.4"),
+    ])
+    data, fname = asyncio.run(download_internet_archive(session, "myid", MockSettings()))
+    assert data == b"%PDF-1.4"
+    assert fname.endswith(".pdf")

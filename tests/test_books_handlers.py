@@ -4,10 +4,10 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from telegram import Update
+from telegram import Message, Update
 
 from bot.config import Settings
-from bot.handlers.books import cmd_fuente, cmd_libro
+from bot.handlers.books import cmd_fuente, cmd_libro, on_book_pick
 from bot.services.books_api import BookResult
 from bot.state import BotStats, RateLimiter
 
@@ -70,8 +70,8 @@ def _make_update(user_id: int = 42) -> MagicMock:
     return update
 
 
-def test_cmd_fuente_default_standard_ebooks() -> None:
-    """Verifies that cmd_fuente shows standard_ebooks as the default when not configured."""
+def test_cmd_fuente_default_open_library() -> None:
+    """Verifies that cmd_fuente shows the real default (Open Library) when not configured."""
     update = _make_update()
     ctx = _make_context()
 
@@ -79,7 +79,7 @@ def test_cmd_fuente_default_standard_ebooks() -> None:
 
     update.effective_message.reply_text.assert_called_once()
     msg = update.effective_message.reply_text.call_args[0][0]
-    assert "Fuente actual: Standard Ebooks" in msg
+    assert "Fuente actual: Open Library" in msg
 
 
 def test_cmd_libro_default_open_library() -> None:
@@ -102,3 +102,62 @@ def test_cmd_libro_default_open_library() -> None:
         update.effective_message.reply_html.assert_called_once()
         reply_markup = update.effective_message.reply_html.call_kwargs.get("reply_markup")
         assert reply_markup is not None
+
+
+def _make_pick_update(idx: int = 0) -> MagicMock:
+    update = MagicMock(spec=Update)
+    query = MagicMock()
+    query.data = f"book:{idx}"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    query.message = MagicMock(spec=Message)
+    query.message.reply_document = AsyncMock()
+    query.message.reply_text = AsyncMock()
+    query.message.reply_html = AsyncMock()
+    update.callback_query = query
+    return update
+
+
+def _make_pick_context(pending: list[dict]) -> MagicMock:
+    ctx = _make_context()
+    ctx.user_data = {"books_pending": pending}
+    db = MagicMock()
+    db.get_file_id = AsyncMock(return_value=None)
+    db.set_file_id = AsyncMock()
+    ctx.application.bot_data["db"] = db
+    return ctx
+
+
+def test_on_book_pick_downloads_open_library() -> None:
+    """Open Library results must be downloaded (via IA), not rejected."""
+    pending = [{"id": "/works/OL1W", "title": "Don Quijote", "source": "open_library"}]
+    update = _make_pick_update()
+    ctx = _make_pick_context(pending)
+
+    download = AsyncMock(return_value=(b"PK\x03\x04data", "Don_Quijote.epub"))
+    with patch.dict("bot.handlers.books.DOWNLOADERS", {"open_library": download}):
+        asyncio.run(on_book_pick(update, ctx))
+
+    download.assert_awaited_once()
+    assert download.call_args[0][1] == "/works/OL1W"
+    update.callback_query.message.reply_document.assert_awaited_once()
+    # La lista se conserva para poder descargar otro resultado.
+    assert ctx.user_data["books_pending"] == pending
+
+
+def test_on_book_pick_error_keeps_results() -> None:
+    """A failed download reports the error and keeps the results for another pick."""
+    from bot.services.books_api import BooksApiError
+
+    pending = [{"id": "x", "title": "Libro", "source": "internet_archive"}]
+    update = _make_pick_update()
+    ctx = _make_pick_context(pending)
+
+    download = AsyncMock(side_effect=BooksApiError("No disponible."))
+    with patch.dict("bot.handlers.books.DOWNLOADERS", {"internet_archive": download}):
+        asyncio.run(on_book_pick(update, ctx))
+
+    update.callback_query.message.reply_document.assert_not_awaited()
+    msg = update.callback_query.message.reply_text.call_args[0][0]
+    assert "No disponible." in msg
+    assert ctx.user_data["books_pending"] == pending

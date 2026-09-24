@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message, Update
+from telegram.error import TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from bot.deps import db_from, http_session_from, limiter_from, settings_from, stats_from
@@ -18,7 +19,7 @@ from bot.services.dbooks import download_dbooks, search_dbooks
 from bot.services.gutenberg import download_gutenberg, search_gutenberg
 from bot.services.internet_archive import download_internet_archive, search_internet_archive
 from bot.services.libgen import download_libgen, search_libgen
-from bot.services.open_library import search_open_library
+from bot.services.open_library import download_open_library, search_open_library
 from bot.services.standard_ebooks import download_standard_ebooks, search_standard_ebooks
 from bot.utils.cache import BoundedTTLCache
 
@@ -35,6 +36,26 @@ SOURCE_LABELS = {
     "internet_archive": "Internet Archive",
     "standard_ebooks": "Standard Ebooks",
 }
+DEFAULT_BOOK_SOURCE = "open_library"
+DOWNLOADERS = {
+    "gutenberg": download_gutenberg,
+    "libgen": download_libgen,
+    "open_library": download_open_library,
+    "dbooks": download_dbooks,
+    "internet_archive": download_internet_archive,
+    "standard_ebooks": download_standard_ebooks,
+}
+
+
+def _default_source(settings) -> str:
+    return "api" if settings.books_api_enabled else DEFAULT_BOOK_SOURCE
+
+
+async def _download_from_source(session, source: str, book_id: str, settings) -> tuple[bytes, str]:
+    downloader = DOWNLOADERS.get(source)
+    if downloader is None:
+        return await download_book_bytes(session, settings, book_id)
+    return await downloader(session, book_id, settings)
 
 
 def _button_label(title: str, *, max_len: int = 58) -> str:
@@ -77,8 +98,10 @@ async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     stats.mark_command("fuente", user.id if user else None)
     args = context.args or []
     if not args:
-        current = context.user_data.get("book_source", "standard_ebooks")
-        label = SOURCE_LABELS.get(current, current)
+        current = context.user_data.get("book_source")
+        if current not in BOOK_SOURCES:
+            current = _default_source(settings_from(context))
+        label = SOURCE_LABELS.get(current, "API propia")
         sources_list = ", ".join(BOOK_SOURCES)
         await msg.reply_text(
             f"Selecciona la fuente de libros con /fuente <opción>.\n"
@@ -224,7 +247,7 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     session = http_session_from(context)
     book_source = context.user_data.get("book_source")
     if book_source not in BOOK_SOURCES:
-        book_source = "api" if settings.books_api_enabled else "open_library"
+        book_source = _default_source(settings)
 
     cache = context.application.bot_data.get("book_search_cache")
     if cache is None:
@@ -349,58 +372,32 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     settings = settings_from(context)
     stats = stats_from(context)
     session = http_session_from(context)
-    source = str(item.get("source", context.user_data.get("book_source", "api")))
-
-    if source == "open_library":
-        await query.message.reply_text(
-            "Open Library es un catálogo bibliográfico, no aloja archivos descargables.\n\n"
-            "Para obtener el archivo directamente, cambia la fuente con:\n"
-            "/fuente standard_ebooks — libros clásicos en ediciones cuidadas\n"
-            "/fuente gutenberg — mayor catálogo de dominio público\n\n"
-            f"Referencia: https://openlibrary.org{book_id}"
-        )
-        context.user_data.pop("books_pending", None)
-        return
+    source = str(item.get("source") or _default_source(settings))
 
     db = db_from(context)
     file_cache_key = f"book:{source}:{book_id}"
 
-    # Try fast path via file_id
+    # El teclado de resultados se conserva para poder elegir otro libro si
+    # este falla; el progreso va en un mensaje aparte que se borra al final.
     cached_file_id = await db.get_file_id(file_cache_key)
     if cached_file_id:
         try:
-            await query.edit_message_text("Enviando desde caché instantánea...")
             await query.message.reply_document(
                 document=cached_file_id,
                 read_timeout=60,
                 write_timeout=60,
             )
             stats.mark_download(ok=True)
-            context.user_data.pop("books_pending", None)
             return
         except Exception as e:
             logger.warning("Caché hit falló para %s: %s", file_cache_key, e)
             # fallback to normal download if Telegram rejected the file_id
 
-    try:
-        await query.edit_message_text("Descargando libro…")
-    except Exception:
-        await query.message.reply_text("Descargando libro…")
+    title = html.escape(str(item.get("title", "")).strip() or "libro")
+    status_msg = await query.message.reply_html(f"⏳ Descargando <b>{title}</b>…")
 
     try:
-        if source == "gutenberg":
-            data, filename = await download_gutenberg(session, book_id, settings)
-        elif source == "libgen":
-            data, filename = await download_libgen(session, book_id, settings)
-        elif source == "dbooks":
-            data, filename = await download_dbooks(session, book_id, settings)
-        elif source == "internet_archive":
-            data, filename = await download_internet_archive(session, book_id, settings)
-        elif source == "standard_ebooks":
-            data, filename = await download_standard_ebooks(session, book_id, settings)
-        else:
-            data, filename = await download_book_bytes(session, settings, book_id)
-
+        data, filename = await _download_from_source(session, source, book_id, settings)
         buf = io.BytesIO(data)
         buf.seek(0)
         msg_out = await query.message.reply_document(
@@ -415,14 +412,17 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except BooksApiError as e:
         stats.mark_download(ok=False)
         logger.info("libro descarga: %s", e)
-        await query.message.reply_text(str(e))
-    except OSError:
+        await query.message.reply_text(f"{e}\nPuedes elegir otro resultado de la lista.")
+    except (OSError, TelegramError):
         stats.mark_download(ok=False)
         logger.exception("libro: envío de documento")
-        await query.message.reply_text("Error al enviar el archivo.")
+        await query.message.reply_text(
+            "Error al enviar el archivo. Puede ser demasiado grande para Telegram; "
+            "prueba con otro resultado."
+        )
     finally:
-        context.user_data.pop("books_pending", None)
-
+        with contextlib.suppress(Exception):
+            await status_msg.delete()
 
 def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_book_page, pattern=r"^bpage:\d+$"))
