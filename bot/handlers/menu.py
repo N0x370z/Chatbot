@@ -127,6 +127,13 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # ── Hints de comandos ────────────────────────────────────────────────────
     if action == "help":
         text, reply_markup = HELP_HTML, main_menu_markup()
+    elif action == "books":
+        # El selector lo atiende bot.handlers.books (callback "bsrc:show").
+        text = MENU_HINTS_HTML["books"]
+        reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⚙️ Elegir fuente", callback_data="bsrc:show")],
+            _back_row(),
+        ])
     elif action in MENU_HINTS_HTML:
         text, reply_markup = MENU_HINTS_HTML[action], main_menu_markup()
     else:

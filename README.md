@@ -16,6 +16,8 @@
 - [Uso del Bot](#uso-del-bot)
 - [Docker Compose](#docker-compose)
 - [Comandos Disponibles](#comandos-disponibles)
+- [Libros: fuentes y descargas](#-libros-fuentes-y-descargas)
+- [Pruebas](#-pruebas)
 - [Contribuir al Repositorio](#contribuir-al-repositorio)
 - [Roadmap](#roadmap)
 - [Licencia](#licencia)
@@ -38,10 +40,10 @@ Además, incluye un worker en segundo plano que monitoriza la carpeta de entrada
 
 ## ✨ Características
 
-- Búsqueda de libros por título, autor o ISBN
+- Búsqueda de libros por título o autor en 6 fuentes, con respaldo automático en paralelo y cambio de fuente con un botón
 - Descarga y envío de archivos multimedia (MP3, MP4, M4A, AAC, MOV)
 - Conversión de formatos de audio para compatibilidad con dispositivos Apple
-- Sistema de búsqueda con resultados paginados
+- Sistema de búsqueda con resultados paginados (la lista se conserva para descargar varios libros)
 - Soporte para múltiples usuarios simultáneos
 - Límite configurable de tamaño de archivo
 - Registro de actividad (logs) por usuario
@@ -55,7 +57,7 @@ Además, incluye un worker en segundo plano que monitoriza la carpeta de entrada
 
 | Herramienta | Uso |
 |---|---|
-| Python 3.11+ | Lenguaje principal |
+| Python 3.11+ (Docker/CI: 3.12) | Lenguaje principal |
 | [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) | Interfaz con la API de Telegram |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Descarga de audio y video |
 | [FFmpeg](https://ffmpeg.org/) | Conversión de formatos multimedia |
@@ -69,35 +71,34 @@ Además, incluye un worker en segundo plano que monitoriza la carpeta de entrada
 ## 📁 Estructura del Proyecto
 
 ```
-TelegramMediaBot/
+Chatbot/
 ├── bot/
-│   ├── __init__.py
-│   ├── main.py               # Punto de entrada del bot
+│   ├── main.py                 # Arranque: sesión HTTP, comandos, handlers
+│   ├── config.py               # Variables de entorno → Settings
+│   ├── texts.py                # Textos del menú y la ayuda
+│   ├── download_queue.py       # Cola de descargas de audio/video
+│   ├── db.py                   # SQLite (caché de file_id, usuarios)
 │   ├── handlers/
-│   │   ├── books.py          # Lógica para libros
-│   │   ├── audio.py          # Lógica para MP3/M4A/AAC
-│   │   ├── video.py          # Lógica para MP4/MOV
-│   │   └── admin.py          # Comandos de administrador
-│   ├── utils/
-│   │   ├── downloader.py     # Descarga de archivos
-│   │   ├── converter.py      # Conversión de formatos
-│   │   └── logger.py         # Sistema de logs
-│   └── config.py             # Configuración global
-├── downloads/                # Carpeta temporal de descargas (en .gitignore)
-├── tests/
-│   └── test_handlers.py
-├── .env.example              # Plantilla de variables de entorno
-├── main.py                   # Entrypoint del bot
-├── main_worker.py            # Entrypoint del worker
-├── src/
-│   └── background_worker.py  # Worker para /data/incoming -> /data/processed
-├── config/
-│   └── worker.env.example    # Variables de entorno del worker
-├── .gitignore
-├── requirements.txt
-├── docker-compose.yml        # Orquestación bot + worker
-├── Dockerfile                # (opcional) Para despliegue en contenedor
-└── README.md
+│   │   ├── books.py            # /libro, /fuente, /convertir y botones de libros
+│   │   ├── menu.py             # /start y menú principal
+│   │   ├── audio.py · video.py # /audio, /apple, /video
+│   │   ├── admin.py            # /stats, /ban, /broadcast…
+│   │   └── …
+│   ├── services/
+│   │   ├── sources.py          # Registro de fuentes de libros (orden = prioridad)
+│   │   ├── http_utils.py       # fetch / fetch_book: reintentos, límites, errores
+│   │   ├── open_library.py · internet_archive.py · dbooks.py
+│   │   ├── libgen.py · gutenberg.py · standard_ebooks.py
+│   │   ├── books_api.py        # API de libros propia (opcional)
+│   │   └── ytdlp_download.py   # Audio/video
+│   └── utils/
+├── src/background_worker.py    # Worker: /data/incoming → /data/processed
+├── tests/                      # pytest (conftest.py con fakes HTTP compartidos)
+├── docs/libros.md              # Documentación técnica de libros
+├── main.py · main_worker.py    # Entrypoints
+├── Makefile                    # make test | test-live | lint | check | dev
+├── Dockerfile · docker-compose.yml · fly.toml
+└── .github/workflows/          # CI (cada push) y live-sources (semanal)
 ```
 
 ---
@@ -119,8 +120,8 @@ Antes de comenzar, asegúrate de tener instalado:
 ### 1. Clonar el repositorio
 
 ```bash
-git clone https://github.com/tu-usuario/TelegramMediaBot.git
-cd TelegramMediaBot
+git clone https://github.com/N0x370z/Chatbot.git
+cd Chatbot
 ```
 
 ### 2. Crear un entorno virtual
@@ -170,6 +171,15 @@ WORKER_POLL_INTERVAL_SEC=1.0
 | `CALIBRE_LIBRARY_PATH` | Ruta de biblioteca de Calibre (opcional) | vacío |
 | `WORKER_POLL_INTERVAL_SEC` | Intervalo del loop principal del worker | `1.0` |
 | `LOG_LEVEL` | Nivel de logging (`INFO`, `DEBUG`) | `INFO` |
+| `ALLOWED_USER_IDS` | IDs autorizados, separados por coma (vacío = todos) | vacío |
+| `MAX_UPLOAD_SIZE_MB` | Tamaño máximo de archivos que envían los usuarios | `50` |
+| `RATE_LIMIT_WINDOW_SEC` / `RATE_LIMIT_MAX_REQUESTS` | Límite de peticiones por usuario | `60` / `10` |
+| `SSL_VERIFY` | Verificar certificados HTTPS salientes | `true` |
+| `BOOKS_API_BASE_URL` | API de libros propia; si se define, pasa a ser la fuente por defecto | vacío |
+| `BOOKS_API_KEY` (+ `_HEADER`, `_PREFIX`) | Clave de esa API; solo se envía a ella | vacío |
+| `BOOKS_API_SEARCH_PATH` / `BOOKS_API_DOWNLOAD_PATH` / `BOOKS_API_QUERY_PARAM` | Rutas y parámetro de la API | `books/search` / `books/{id}/download` / `q` |
+| `BOOKS_API_MAX_RESULTS` | Resultados por página en `/libro` | `8` |
+| `BOOKS_API_TIMEOUT_SEC` | Timeout de la API propia | `60` |
 
 > ⚠️ Nunca subas tu archivo `.env` al repositorio. Está incluido en `.gitignore`.
 
@@ -250,17 +260,54 @@ Y toma variables desde `.env`.
 | Comando | Descripción |
 |---|---|
 | `/start` | Inicia el bot y muestra el menú principal |
-| `/libro <título o autor>` | Busca y envía un libro |
-| `/fuente` | Elegir fuente de libros (Gutenberg/Libgen/Open Library) |
+| `/libro <título o autor>` | Busca libros; toca un resultado para descargarlo o «🔁 Otra fuente» |
+| `/fuente [clave]` | Selector de fuente con botones (`open_library`, `internet_archive`, `dbooks`, `libgen`, `gutenberg`, `standard_ebooks`) |
 | `/convertir <formato>` | Convertir libro a otro formato |
 | `/audio <nombre o URL>` | Descarga y envía audio (MP3/M4A) |
 | `/formato_audio` | Elegir formato de audio (MP3/M4A/OPUS/FLAC) |
 | `/video <nombre o URL>` | Descarga y envía video (MP4) |
 | `/apple <nombre o URL>` | Descarga en formato compatible con iPod/Apple (M4A/AAC/M4B) |
 | `/jobs` | Ver estado de descargas en cola |
-| `/ping` | Prueba de conexión |
+| `/cancelar` | Cancelar la última descarga pendiente |
+| `/estado` | Ver tus preferencias (fuente, formato de audio) |
+| `/version` · `/ping` | Versión del bot · prueba de conexión |
 | `/ayuda` | Muestra la lista de comandos |
-| `/stats` | (Solo admin) Estadísticas de uso |
+| `/stats` · `/diagnostico` | (Solo admin) Estadísticas y diagnóstico |
+| `/ban` · `/unban` · `/broadcast` | (Solo admin) Gestión de usuarios y avisos |
+
+---
+
+## 📚 Libros: fuentes y descargas
+
+Por defecto se busca en **Open Library**, que solo devuelve obras de dominio público con copia descargable, y se descarga su EPUB/PDF desde Internet Archive. Si una fuente no da resultados, el bot consulta el resto en paralelo y avisa de cuál usó.
+
+| Fuente | Ideal para |
+|---|---|
+| Open Library / Internet Archive | Clásicos y libros de dominio público |
+| dBooks | Programación y tecnología (PDF gratuitos) |
+| Libgen | Libros técnicos y académicos |
+| Gutenberg / Standard Ebooks | Clásicos (sus APIs fallan a menudo; van al final del respaldo) |
+
+Las descargas se limitan a `MAX_FILE_SIZE_MB`, que por defecto es 50 MB, el máximo que Telegram permite enviar a un bot.
+
+El funcionamiento interno está en **[docs/libros.md](docs/libros.md)**: cómo se piden los recursos, cómo añadir una fuente y problemas conocidos de cada API.
+
+---
+
+## 🧪 Pruebas
+
+```bash
+make test        # tests rápidos, sin red (~2 s)
+make lint        # ruff
+make check       # lint + test (hazlo antes de cada commit)
+make test-live   # busca y descarga un libro real en cada fuente (minutos, requiere red)
+```
+
+- CI (`.github/workflows/ci.yml`) ejecuta `ruff` y `pytest` en cada push y PR a `main` y `BearDev`.
+- `live-sources.yml` ejecuta `make test-live` cada lunes (y a mano desde *Actions*). Así se detecta cuándo una fuente externa cambia o cae, aunque el código no haya cambiado.
+- Los tests `live` están marcados con `@pytest.mark.live` y quedan excluidos de `pytest` por defecto (`pyproject.toml`).
+
+> En macOS, si ves `CERTIFICATE_VERIFY_FAILED`, ejecuta `Install Certificates.command` de tu instalación de Python o exporta `SSL_CERT_FILE=$(python -m certifi)`.
 
 ---
 
@@ -301,6 +348,12 @@ git add bot/handlers/audio.py
 
 # O añadir todos los cambios de golpe
 git add .
+```
+
+Antes de hacer commit, comprueba que todo pasa:
+
+```bash
+make check
 ```
 
 #### 4. Haz un commit con un mensaje claro
@@ -383,6 +436,8 @@ git commit -m "fix: eliminar archivo sensible del repositorio"
 - [x] Panel de administración con estadísticas
 - [x] Dockerización del bot
 - [x] Despliegue en servidor VPS / Railway / Fly.io
+- [x] Descarga de libros desde Open Library / Internet Archive con respaldo entre fuentes
+- [x] Pruebas automáticas contra las fuentes reales (semanales)
 
 ---
 

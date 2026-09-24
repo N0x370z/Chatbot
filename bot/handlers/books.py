@@ -1,7 +1,16 @@
-"""Libros — búsqueda vía API REST y descarga al elegir resultado."""
+"""Libros — búsqueda, selección de fuente y descarga.
+
+Flujo de la interfaz:
+  /libro <consulta>  → mensaje con resultados (botones), paginación y
+                       «🔁 Otra fuente» para repetir la búsqueda en otra.
+  /fuente            → selector de fuente con botones (o /fuente <clave>).
+Si la fuente elegida no da resultados, se consultan las demás en paralelo y
+se muestran los de la primera (según prioridad) que responda.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import html
 import io
@@ -15,47 +24,34 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from bot.deps import db_from, http_session_from, limiter_from, settings_from, stats_from
 from bot.handlers import menu
 from bot.services.books_api import BookResult, BooksApiError, download_book_bytes, search_books
-from bot.services.dbooks import download_dbooks, search_dbooks
-from bot.services.gutenberg import download_gutenberg, search_gutenberg
-from bot.services.internet_archive import download_internet_archive, search_internet_archive
-from bot.services.libgen import download_libgen, search_libgen
-from bot.services.open_library import download_open_library, search_open_library
-from bot.services.standard_ebooks import download_standard_ebooks, search_standard_ebooks
+from bot.services.sources import DEFAULT_SOURCE, SOURCES
 from bot.utils.cache import BoundedTTLCache
 
 logger = logging.getLogger(__name__)
 
 BOOK_PREFIX = "book:"
-BOOK_SOURCES = ("gutenberg", "libgen", "open_library", "dbooks", "internet_archive", "standard_ebooks")
-FALLBACK_CHAIN = ("open_library", "internet_archive", "dbooks", "libgen", "gutenberg", "standard_ebooks")
-SOURCE_LABELS = {
-    "gutenberg": "Gutenberg",
-    "libgen": "Libgen",
-    "open_library": "Open Library",
-    "dbooks": "DBooks",
-    "internet_archive": "Internet Archive",
-    "standard_ebooks": "Standard Ebooks",
-}
-DEFAULT_BOOK_SOURCE = "open_library"
-DOWNLOADERS = {
-    "gutenberg": download_gutenberg,
-    "libgen": download_libgen,
-    "open_library": download_open_library,
-    "dbooks": download_dbooks,
-    "internet_archive": download_internet_archive,
-    "standard_ebooks": download_standard_ebooks,
-}
+PAGE_PREFIX = "bpage:"
+SOURCE_PREFIX = "bsrc:"  # elegir fuente por defecto
+RETRY_PREFIX = "bretry:"  # repetir la búsqueda actual en otra fuente
+OTHER_SOURCES_CB = "bother"
+API_SOURCE = "api"
+BOOK_SOURCES = tuple(SOURCES)
+# Límite por fuente al buscar en paralelo y por descarga completa.
+SEARCH_DEADLINE_SEC = 25
+DOWNLOAD_DEADLINE_SEC = 300
+
+
+def _label(source: str) -> str:
+    return SOURCES[source].label if source in SOURCES else "API propia"
 
 
 def _default_source(settings) -> str:
-    return "api" if settings.books_api_enabled else DEFAULT_BOOK_SOURCE
+    return API_SOURCE if settings.books_api_enabled else DEFAULT_SOURCE
 
 
-async def _download_from_source(session, source: str, book_id: str, settings) -> tuple[bytes, str]:
-    downloader = DOWNLOADERS.get(source)
-    if downloader is None:
-        return await download_book_bytes(session, settings, book_id)
-    return await downloader(session, book_id, settings)
+def _current_source(context: ContextTypes.DEFAULT_TYPE) -> str:
+    chosen = (context.user_data or {}).get("book_source")
+    return chosen if chosen in SOURCES else _default_source(settings_from(context))
 
 
 def _button_label(title: str, *, max_len: int = 58) -> str:
@@ -63,63 +59,85 @@ def _button_label(title: str, *, max_len: int = 58) -> str:
     return t if len(t) <= max_len else f"{t[: max_len - 3]}..."
 
 
+# ── Teclados ─────────────────────────────────────────────────────────────────
+
 def _build_books_keyboard(pending: list[dict], page: int, page_size: int) -> InlineKeyboardMarkup:
     start = page * page_size
     end = start + page_size
-    page_items = pending[start:end]
-
     keyboard = [
-        [
-            InlineKeyboardButton(
-                _button_label(item["title"]),
-                callback_data=f"{BOOK_PREFIX}{start + i}",
-            )
-        ]
-        for i, item in enumerate(page_items)
+        [InlineKeyboardButton(_button_label(item["title"]), callback_data=f"{BOOK_PREFIX}{start + i}")]
+        for i, item in enumerate(pending[start:end])
     ]
-
     nav_row = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"bpage:{page - 1}"))
+        nav_row.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"{PAGE_PREFIX}{page - 1}"))
     if end < len(pending):
-        nav_row.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"bpage:{page + 1}"))
+        nav_row.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"{PAGE_PREFIX}{page + 1}"))
     if nav_row:
         keyboard.append(nav_row)
-
+    keyboard.append([InlineKeyboardButton("🔁 Otra fuente", callback_data=OTHER_SOURCES_CB)])
     return InlineKeyboardMarkup(keyboard)
 
+
+def _sources_keyboard(prefix: str, current: str, *, back_cb: str | None = None) -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(
+            f"{'✅ ' if key == current else ''}{src.label}", callback_data=f"{prefix}{key}"
+        )
+        for key, src in SOURCES.items()
+    ]
+    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+    if back_cb:
+        rows.append([InlineKeyboardButton("⬅️ Volver", callback_data=back_cb)])
+    return InlineKeyboardMarkup(rows)
+
+
+def _sources_text(current: str) -> str:
+    lines = [f"<b>📚 Fuente de libros</b>\nActual: <b>{html.escape(_label(current))}</b>\n"]
+    lines += [f"• <b>{s.label}</b> — {s.description}" for s in SOURCES.values()]
+    lines.append("\nToca una fuente para usarla en tus próximas búsquedas.")
+    return "\n".join(lines)
+
+
+# ── /fuente ──────────────────────────────────────────────────────────────────
 
 async def cmd_fuente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     msg = update.effective_message
     if not msg or context.user_data is None:
         return
-    stats = stats_from(context)
-    stats.mark_command("fuente", user.id if user else None)
+    stats_from(context).mark_command("fuente", user.id if user else None)
     args = context.args or []
     if not args:
-        current = context.user_data.get("book_source")
-        if current not in BOOK_SOURCES:
-            current = _default_source(settings_from(context))
-        label = SOURCE_LABELS.get(current, "API propia")
-        sources_list = ", ".join(BOOK_SOURCES)
-        await msg.reply_text(
-            f"Selecciona la fuente de libros con /fuente <opción>.\n"
-            f"Opciones: {sources_list}\n"
-            f"Fuente actual: {label}"
-        )
+        current = _current_source(context)
+        await msg.reply_html(_sources_text(current), reply_markup=_sources_keyboard(SOURCE_PREFIX, current))
         return
 
     choice = args[0].strip().lower()
-    if choice not in BOOK_SOURCES:
-        sources_list = ", ".join(BOOK_SOURCES)
-        await msg.reply_text(
-            f"Fuente no válida. Usa /fuente con una de: {sources_list}"
-        )
+    if choice not in SOURCES:
+        await msg.reply_text(f"Fuente no válida. Usa /fuente con una de: {', '.join(BOOK_SOURCES)}")
         return
-
     context.user_data["book_source"] = choice
-    await msg.reply_text(f"Fuente guardada: {SOURCE_LABELS[choice]}")
+    await msg.reply_text(f"Fuente guardada: {_label(choice)}")
+
+
+async def on_source_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or context.user_data is None:
+        return
+    choice = (query.data or "").removeprefix(SOURCE_PREFIX)
+    if choice in SOURCES:
+        context.user_data["book_source"] = choice
+        await query.answer(f"Fuente: {_label(choice)}")
+    else:  # "show" desde el menú principal
+        await query.answer()
+    current = _current_source(context)
+    with contextlib.suppress(TelegramError):
+        await query.edit_message_text(
+            _sources_text(current),
+            parse_mode="HTML",
+            reply_markup=_sources_keyboard(SOURCE_PREFIX, current),
+        )
 
 
 async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -201,20 +219,73 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await msg.reply_text("Error al enviar el archivo convertido.")
 
 
-async def _search_source(session, source: str, q: str, limit: int, settings) -> list[BookResult]:
-    if source == "gutenberg":
-        return await search_gutenberg(session, q, limit)
-    if source == "libgen":
-        return await search_libgen(session, q, limit, settings)
-    if source == "open_library":
-        return await search_open_library(session, q, limit)
-    if source == "dbooks":
-        return await search_dbooks(session, q, limit)
-    if source == "internet_archive":
-        return await search_internet_archive(session, q, limit)
-    if source == "standard_ebooks":
-        return await search_standard_ebooks(session, q, limit)
-    return await search_books(session, settings, q)
+# ── Búsqueda ─────────────────────────────────────────────────────────────────
+
+def _search_cache(context: ContextTypes.DEFAULT_TYPE) -> BoundedTTLCache:
+    cache = context.application.bot_data.get("book_search_cache")
+    if cache is None:
+        cache = BoundedTTLCache(maxsize=100, ttl=300)
+        context.application.bot_data["book_search_cache"] = cache
+    return cache
+
+
+async def _search_one(context: ContextTypes.DEFAULT_TYPE, source: str, q: str) -> list[BookResult]:
+    """Busca en una fuente (con caché). Los errores se registran y devuelven []."""
+    cache = _search_cache(context)
+    cache_key = f"{source}:{q}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    settings = settings_from(context)
+    session = http_session_from(context)
+    try:
+        async with asyncio.timeout(SEARCH_DEADLINE_SEC):
+            if source in SOURCES:
+                results = await SOURCES[source].search(
+                    session, q, settings.books_api_max_results * 4, settings
+                )
+            else:
+                results = await search_books(session, settings, q)
+    except (BooksApiError, TimeoutError) as e:
+        logger.info("libro búsqueda %s: %s", source, e or "timeout")
+        return []
+    except Exception:
+        # Una fuente con un fallo inesperado no debe tumbar la búsqueda en paralelo.
+        logger.exception("libro búsqueda %s: error inesperado", source)
+        return []
+    if results:
+        cache.set(cache_key, results)
+    return results
+
+
+async def _search_with_fallback(
+    context: ContextTypes.DEFAULT_TYPE, source: str, q: str
+) -> tuple[list[BookResult], str]:
+    results = await _search_one(context, source, q)
+    if results:
+        return results, source
+    others = [key for key in SOURCES if key != source]
+    all_results = await asyncio.gather(*(_search_one(context, key, q) for key in others))
+    for key, found in zip(others, all_results, strict=True):
+        if found:
+            return found, key
+    return [], source
+
+
+def _results_text(q: str, source: str, requested: str) -> str:
+    text = f"📚 Resultados para <b>{html.escape(q)}</b> en <i>{html.escape(_label(source))}</i>:"
+    if source != requested:
+        text += f"\n<i>({html.escape(_label(requested))} no dio resultados.)</i>"
+    return text
+
+
+def _store_results(context: ContextTypes.DEFAULT_TYPE, q: str, source: str, results: list[BookResult]) -> list[dict]:
+    pending = [{"id": r.id, "title": r.title, "source": source} for r in results]
+    context.user_data["books_pending"] = pending
+    context.user_data["books_query"] = q
+    context.user_data["books_results_source"] = source
+    return pending
 
 
 async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -228,139 +299,131 @@ async def cmd_libro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not q:
         await msg.reply_html(
             "Uso: <code>/libro &lt;título o autor&gt;</code>\n\n"
-            "Ejemplo: <code>/libro nombre del libro</code>",
+            "Ejemplo: <code>/libro don quijote</code>\n"
+            "Cambia la fuente con /fuente.",
             reply_markup=menu.main_menu_markup(),
         )
         return
 
-    settings = settings_from(context)
-    user_id = user.id if user else None
-    if user_id is None:
+    if user is None:
         return
-    if not limiter_from(context).allow(user_id):
+    if not limiter_from(context).allow(user.id):
         stats.mark_rate_limited()
-        await msg.reply_text(
-            "Demasiadas solicitudes seguidas. Espera un momento e inténtalo de nuevo."
-        )
+        await msg.reply_text("Demasiadas solicitudes seguidas. Espera un momento e inténtalo de nuevo.")
         return
 
-    session = http_session_from(context)
-    book_source = context.user_data.get("book_source")
-    if book_source not in BOOK_SOURCES:
-        book_source = _default_source(settings)
+    requested = _current_source(context)
+    status = await msg.reply_html(f"🔎 Buscando <b>{html.escape(q)}</b>…")
+    results, source = await _search_with_fallback(context, requested, q)
 
-    cache = context.application.bot_data.get("book_search_cache")
-    if cache is None:
-        cache = BoundedTTLCache(maxsize=100, ttl=300)
-        context.application.bot_data["book_search_cache"] = cache
-
-    fetch_limit = settings.books_api_max_results * 4
-    results: list[BookResult] = []
-    effective_source = book_source
-    fallback_used: str | None = None
-
-    cached = cache.get(f"{book_source}:{q}")
-    if cached is not None:
-        logger.debug("book cache hit for %s:%s", book_source, q)
-        results = cached
-    else:
-        logger.debug("book cache miss for %s:%s", book_source, q)
+    if not results:
+        text = "Ninguna fuente encontró resultados para esa búsqueda. Prueba con otras palabras."
         try:
-            results = await _search_source(session, book_source, q, fetch_limit, settings)
-        except BooksApiError as e:
-            logger.info("libro búsqueda %s: %s", book_source, e)
-        if results:
-            cache.set(f"{book_source}:{q}", results)
-
-    if not results:
-        for fb in FALLBACK_CHAIN:
-            if fb == book_source:
-                continue
-            cached_fb = cache.get(f"{fb}:{q}")
-            if cached_fb is not None:
-                results = cached_fb
-                effective_source = fb
-                fallback_used = fb
-                break
-            try:
-                results = await _search_source(session, fb, q, fetch_limit, settings)
-            except BooksApiError as e:
-                logger.info("libro fallback %s: %s", fb, e)
-                continue
-            if results:
-                cache.set(f"{fb}:{q}", results)
-                effective_source = fb
-                fallback_used = fb
-                break
-
-    if not results:
-        await msg.reply_text(
-            "Ninguna fuente respondió para esa búsqueda. Inténtalo de nuevo más tarde."
-        )
+            await status.edit_text(text)
+        except TelegramError:
+            await msg.reply_text(text)
         return
 
-    context.user_data["books_pending"] = [
-        {"id": r.id, "title": r.title, "source": effective_source} for r in results
-    ]
-
-    keyboard = _build_books_keyboard(context.user_data["books_pending"], 0, settings.books_api_max_results)
-    safe_q = html.escape(q)
-    fallback_note = (
-        f"\n<i>(usando {html.escape(SOURCE_LABELS.get(fallback_used, fallback_used))} como respaldo)</i>"
-        if fallback_used else ""
-    )
-    await msg.reply_html(
-        f"Resultados para <b>{safe_q}</b>:{fallback_note}",
-        reply_markup=keyboard,
-    )
+    pending = _store_results(context, q, source, results)
+    settings = settings_from(context)
+    keyboard = _build_books_keyboard(pending, 0, settings.books_api_max_results)
+    text = _results_text(q, source, requested)
+    try:
+        await status.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except TelegramError:
+        await msg.reply_html(text, reply_markup=keyboard)
 
 
 async def on_book_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not query or not query.message or context.user_data is None:
-        return
-    if not isinstance(query.message, Message):
+    if not query or not isinstance(query.message, Message) or context.user_data is None:
         return
     await query.answer()
-
     try:
-        page = int((query.data or "").removeprefix("bpage:"))
+        page = int((query.data or "").removeprefix(PAGE_PREFIX))
     except ValueError:
         return
 
     pending = context.user_data.get("books_pending")
     if not isinstance(pending, list):
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(TelegramError):
             await query.edit_message_text("Resultados expirados. Busca de nuevo.")
         return
-
-    settings = settings_from(context)
-    keyboard = _build_books_keyboard(pending, page, settings.books_api_max_results)
-
-    with contextlib.suppress(Exception):
+    keyboard = _build_books_keyboard(pending, page, settings_from(context).books_api_max_results)
+    with contextlib.suppress(TelegramError):
         await query.edit_message_reply_markup(reply_markup=keyboard)
+
+
+async def on_other_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sustituye los resultados por la lista de fuentes para repetir la búsqueda."""
+    query = update.callback_query
+    if not query or context.user_data is None:
+        return
+    await query.answer()
+    current = context.user_data.get("books_results_source", "")
+    with contextlib.suppress(TelegramError):
+        await query.edit_message_reply_markup(
+            reply_markup=_sources_keyboard(RETRY_PREFIX, current, back_cb=f"{PAGE_PREFIX}0")
+        )
+
+
+async def on_retry_source(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user or context.user_data is None:
+        return
+    source = (query.data or "").removeprefix(RETRY_PREFIX)
+    q = context.user_data.get("books_query")
+    if source not in SOURCES or not q:
+        await query.answer("Búsqueda expirada. Usa /libro de nuevo.", show_alert=True)
+        return
+    if not limiter_from(context).allow(user.id):
+        stats_from(context).mark_rate_limited()
+        await query.answer("Demasiadas solicitudes. Espera un momento.", show_alert=True)
+        return
+    await query.answer(f"Buscando en {_label(source)}…")
+
+    results = await _search_one(context, source, q)
+    if not results:
+        with contextlib.suppress(TelegramError):
+            await query.edit_message_text(
+                f"Sin resultados para <b>{html.escape(q)}</b> en <i>{html.escape(_label(source))}</i>. "
+                "Prueba otra fuente:",
+                parse_mode="HTML",
+                reply_markup=_sources_keyboard(RETRY_PREFIX, source),
+            )
+        return
+
+    pending = _store_results(context, q, source, results)
+    keyboard = _build_books_keyboard(pending, 0, settings_from(context).books_api_max_results)
+    with contextlib.suppress(TelegramError):
+        await query.edit_message_text(
+            _results_text(q, source, source), parse_mode="HTML", reply_markup=keyboard
+        )
+
+
+# ── Descarga ─────────────────────────────────────────────────────────────────
+
+async def _download_from_source(session, source: str, book_id: str, settings) -> tuple[bytes, str]:
+    if source in SOURCES:
+        return await SOURCES[source].download(session, book_id, settings)
+    return await download_book_bytes(session, settings, book_id)
 
 
 async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not query or not query.message or context.user_data is None:
-        return
-    if not isinstance(query.message, Message):
+    if not query or not isinstance(query.message, Message) or context.user_data is None:
         return
     await query.answer()
 
-    raw = (query.data or "").removeprefix(BOOK_PREFIX)
     try:
-        idx = int(raw)
+        idx = int((query.data or "").removeprefix(BOOK_PREFIX))
     except ValueError:
         return
 
     pending = context.user_data.get("books_pending")
     if not isinstance(pending, list) or idx < 0 or idx >= len(pending):
-        try:
-            await query.edit_message_text("Selección no válida o expirada. Usa /libro de nuevo.")
-        except Exception:
-            await query.message.reply_text("Selección no válida o expirada. Usa /libro de nuevo.")
+        await query.message.reply_text("Selección no válida o expirada. Usa /libro de nuevo.")
         return
 
     item = pending[idx]
@@ -371,10 +434,8 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     settings = settings_from(context)
     stats = stats_from(context)
-    session = http_session_from(context)
-    source = str(item.get("source") or _default_source(settings))
-
     db = db_from(context)
+    source = str(item.get("source") or _default_source(settings))
     file_cache_key = f"book:{source}:{book_id}"
 
     # El teclado de resultados se conserva para poder elegir otro libro si
@@ -382,26 +443,25 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     cached_file_id = await db.get_file_id(file_cache_key)
     if cached_file_id:
         try:
-            await query.message.reply_document(
-                document=cached_file_id,
-                read_timeout=60,
-                write_timeout=60,
-            )
+            await query.message.reply_document(document=cached_file_id, read_timeout=60, write_timeout=60)
             stats.mark_download(ok=True)
             return
-        except Exception as e:
+        except TelegramError as e:
             logger.warning("Caché hit falló para %s: %s", file_cache_key, e)
-            # fallback to normal download if Telegram rejected the file_id
 
     title = html.escape(str(item.get("title", "")).strip() or "libro")
-    status_msg = await query.message.reply_html(f"⏳ Descargando <b>{title}</b>…")
+    status_msg = await query.message.reply_html(
+        f"⏳ Descargando <b>{title}</b> de {html.escape(_label(source))}…\n"
+        "<i>Los archivos grandes pueden tardar un par de minutos.</i>"
+    )
 
     try:
-        data, filename = await _download_from_source(session, source, book_id, settings)
-        buf = io.BytesIO(data)
-        buf.seek(0)
+        async with asyncio.timeout(DOWNLOAD_DEADLINE_SEC):
+            data, filename = await _download_from_source(
+                http_session_from(context), source, book_id, settings
+            )
         msg_out = await query.message.reply_document(
-            document=InputFile(buf, filename=filename),
+            document=InputFile(io.BytesIO(data), filename=filename),
             read_timeout=600,
             write_timeout=600,
             connect_timeout=60,
@@ -409,10 +469,11 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if msg_out and msg_out.document:
             await db.set_file_id(file_cache_key, msg_out.document.file_id)
         stats.mark_download(ok=True)
-    except BooksApiError as e:
+    except (BooksApiError, TimeoutError) as e:
         stats.mark_download(ok=False)
-        logger.info("libro descarga: %s", e)
-        await query.message.reply_text(f"{e}\nPuedes elegir otro resultado de la lista.")
+        reason = str(e) or "La descarga tardó demasiado."
+        logger.info("libro descarga %s %s: %s", source, book_id, reason)
+        await query.message.reply_text(f"{reason}\nPuedes elegir otro resultado de la lista.")
     except (OSError, TelegramError):
         stats.mark_download(ok=False)
         logger.exception("libro: envío de documento")
@@ -421,12 +482,16 @@ async def on_book_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "prueba con otro resultado."
         )
     finally:
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(TelegramError):
             await status_msg.delete()
+
 
 def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_book_page, pattern=r"^bpage:\d+$"))
     application.add_handler(CallbackQueryHandler(on_book_pick, pattern=r"^book:\d+$"))
+    application.add_handler(CallbackQueryHandler(on_source_pick, pattern=r"^bsrc:\w+$"))
+    application.add_handler(CallbackQueryHandler(on_retry_source, pattern=r"^bretry:\w+$"))
+    application.add_handler(CallbackQueryHandler(on_other_sources, pattern=r"^bother$"))
     application.add_handler(CommandHandler("fuente", cmd_fuente))
     application.add_handler(CommandHandler("libro", cmd_libro))
     application.add_handler(CommandHandler("convertir", cmd_convertir))

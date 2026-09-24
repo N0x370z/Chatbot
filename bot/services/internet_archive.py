@@ -1,6 +1,6 @@
-"""Integración con Internet Archive para búsqueda y descarga de libros.
+"""Internet Archive: búsqueda y descarga de libros de acceso libre.
 
-API pública, sin clave. Documentación:
+API pública, sin clave:
   https://archive.org/advancedsearch.php  (búsqueda)
   https://archive.org/metadata/{id}       (metadatos + archivos)
 """
@@ -8,29 +8,23 @@ API pública, sin clave. Documentación:
 from __future__ import annotations
 
 import logging
-import re
-from urllib.parse import quote, urlencode
+from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
-from bot.services._book_validation import validate_book_bytes
-from bot.services.books_api import BookResult, BooksApiError
+from bot.services.base import BookResult, BooksApiError, book_label, safe_filename
+from bot.services.http_utils import fetch, fetch_book
 
 logger = logging.getLogger(__name__)
 
-_SEARCH_URL = "https://archive.org/advancedsearch.php"
+SOURCE = "Internet Archive"
+SEARCH_URL = "https://archive.org/advancedsearch.php"
 _METADATA_URL = "https://archive.org/metadata"
 _DOWNLOAD_URL = "https://archive.org/download"
 
-# Orden de preferencia de formatos descargables. IA reporta el formato con
-# mayúsculas variables ("EPUB", "Text PDF"...), así que se compara en minúsculas.
-_FORMAT_PRIORITY = [
-    "epub",
-    "application/epub+zip",
-    "text pdf",
-    "additional text pdf",
-    "pdf",
-]
+# Formatos por preferencia. IA los reporta con mayúsculas variables
+# ("EPUB", "Text PDF"...), así que se comparan en minúsculas.
 _FORMAT_EXT = {
     "epub": ".epub",
     "application/epub+zip": ".epub",
@@ -38,82 +32,54 @@ _FORMAT_EXT = {
     "additional text pdf": ".pdf",
     "pdf": ".pdf",
 }
+_FORMAT_PRIORITY = list(_FORMAT_EXT)
+# Filtro de búsqueda: solo ítems que tengan algún formato descargable.
+_FORMAT_QUERY = 'format:(EPUB OR "Text PDF" OR PDF)'
+# Archivos que se prueban por ítem. Las colecciones pueden tener cientos de
+# EPUB y los servidores de IA son lentos: probar todos puede tardar minutos.
+MAX_FILE_ATTEMPTS = 3
 
-def _safe_filename(name: str) -> str:
-    base = re.sub(r"[^\w\-.]+", "_", name.strip())[:80]
-    return base or "libro"
+
+def _first(value: Any) -> str:
+    if isinstance(value, list):
+        value = value[0] if value else ""
+    return str(value or "").strip()
 
 
-async def search_internet_archive(
-    session: aiohttp.ClientSession,
-    query: str,
-    max_results: int,
-) -> list[BookResult]:
-    params = {
-        "q": f"{query} AND mediatype:texts AND NOT access-restricted-item:true",
-        "fl[]": ["identifier", "title", "creator"],
-        "output": "json",
-        "rows": max(1, max_results),
-        "page": 1,
-        "sort[]": "downloads desc",
-    }
-    url = f"{_SEARCH_URL}?{urlencode(params, doseq=True)}"
-    timeout = aiohttp.ClientTimeout(total=25, connect=8)
-
-    try:
-        async with session.get(url, timeout=timeout) as resp:
-            resp.raise_for_status()
-            payload = await resp.json(content_type=None)
-    except TimeoutError as e:
-        logger.warning("internet archive search timeout: %s", e)
-        raise BooksApiError("Internet Archive tardó demasiado en responder.") from e
-    except aiohttp.ClientError as e:
-        logger.warning("internet archive search client error: %s", e)
-        raise BooksApiError("No se pudo contactar Internet Archive.") from e
-    except ValueError as e:
-        logger.warning("internet archive search invalid json: %s", e)
-        raise BooksApiError("Internet Archive devolvió datos inválidos.") from e
-
+def parse_ia_search(payload: Any, max_results: int) -> list[BookResult]:
     try:
         docs = payload["response"]["docs"]
     except (KeyError, TypeError):
         return []
-
     results: list[BookResult] = []
-    for doc in docs:
-        if not isinstance(doc, dict):
+    for doc in docs if isinstance(docs, list) else []:
+        if not isinstance(doc, dict) or not _first(doc.get("identifier")):
             continue
-        identifier = str(doc.get("identifier", "")).strip()
-        if not identifier:
-            continue
-        title = str(doc.get("title", "")).strip() or "Sin título"
-        creator = doc.get("creator")
-        if isinstance(creator, list):
-            creator = creator[0] if creator else ""
-        creator = str(creator or "").strip()
-        label = f"{title} - {creator}" if creator else title
-        results.append(BookResult(id=identifier, title=label[:500]))
+        results.append(
+            BookResult(
+                id=_first(doc["identifier"]),
+                title=book_label(_first(doc.get("title")), _first(doc.get("creator"))),
+            )
+        )
         if len(results) >= max(1, max_results):
             break
-
     return results
 
 
-def _pick_candidates(files: list, limit: int) -> list[tuple[str, str]]:
-    """Devuelve (nombre, extensión) de los archivos descargables, por preferencia.
+def pick_files(files: Any, limit: int) -> list[tuple[str, str]]:
+    """(nombre, extensión) de los archivos descargables, por preferencia.
 
     Descarta archivos privados (préstamo controlado) y los que según los
-    metadatos superan el límite de tamaño.
+    metadatos superan el límite de tamaño. Dentro de cada formato, el más
+    pequeño primero: suele ser el mismo libro y llega antes.
     """
-    by_format: dict[str, list[str]] = {}
-    for f in files:
+    by_format: dict[str, list[tuple[int, str]]] = {}
+    for f in files if isinstance(files, list) else []:
         if not isinstance(f, dict):
             continue
         fmt = str(f.get("format", "")).strip().lower()
-        fname = str(f.get("name", "")).strip()
-        if fmt not in _FORMAT_EXT or not fname:
-            continue
-        if str(f.get("private", "")).lower() == "true":
+        name = str(f.get("name", "")).strip()
+        if fmt not in _FORMAT_EXT or not name or str(f.get("private", "")).lower() == "true":
             continue
         try:
             size = int(f.get("size", 0))
@@ -121,41 +87,56 @@ def _pick_candidates(files: list, limit: int) -> list[tuple[str, str]]:
             size = 0
         if size > limit:
             continue
-        by_format.setdefault(fmt, []).append(fname)
+        by_format.setdefault(fmt, []).append((size, name))
+    return [
+        (name, _FORMAT_EXT[fmt])
+        for fmt in _FORMAT_PRIORITY
+        for _, name in sorted(by_format.get(fmt, []))
+    ]
 
-    candidates: list[tuple[str, str]] = []
-    for fmt in _FORMAT_PRIORITY:
-        candidates.extend((name, _FORMAT_EXT[fmt]) for name in by_format.get(fmt, []))
-    return candidates
 
-
-async def _fetch_file(
+async def search_internet_archive(
     session: aiohttp.ClientSession,
-    url: str,
-    limit: int,
-) -> bytes:
-    timeout_file = aiohttp.ClientTimeout(total=180, connect=10)
-    try:
-        async with session.get(url, timeout=timeout_file) as resp:
-            resp.raise_for_status()
-            cl = resp.content_length
-            if cl is not None and cl > limit:
-                raise BooksApiError(
-                    f"El archivo (~{cl // (1024 * 1024)} MB) supera el límite."
-                )
-            data = await resp.read()
-    except TimeoutError as e:
-        logger.warning("internet archive download timeout: %s", e)
-        raise BooksApiError("Internet Archive tardó demasiado en enviar el archivo.") from e
-    except aiohttp.ClientError as e:
-        logger.warning("internet archive download client error: %s", e)
-        raise BooksApiError("No se pudo descargar el archivo de Internet Archive.") from e
+    query: str,
+    max_results: int,
+) -> list[BookResult]:
+    payload = await fetch(
+        session,
+        SEARCH_URL,
+        source=SOURCE,
+        params={
+            "q": f"({query}) AND mediatype:texts AND NOT access-restricted-item:true AND {_FORMAT_QUERY}",
+            "fl[]": ["identifier", "title", "creator"],
+            "rows": max(1, max_results),
+            "sort[]": "downloads desc",
+            "output": "json",
+        },
+    )
+    return parse_ia_search(payload, max_results)
 
-    if len(data) > limit:
-        raise BooksApiError("El archivo descargado supera MAX_FILE_SIZE_MB.")
 
-    validate_book_bytes(data)
-    return data
+async def public_identifiers(
+    session: aiohttp.ClientSession,
+    identifiers: list[str],
+    max_results: int,
+) -> list[str]:
+    """Filtra ``identifiers`` a los de acceso libre con EPUB/PDF, más descargados primero."""
+    ids = [i for i in identifiers if i.replace("_", "").replace("-", "").replace(".", "").isalnum()]
+    if not ids:
+        return []
+    payload = await fetch(
+        session,
+        SEARCH_URL,
+        source=SOURCE,
+        params={
+            "q": f"identifier:({' OR '.join(ids)}) AND NOT access-restricted-item:true AND {_FORMAT_QUERY}",
+            "fl[]": "identifier",
+            "rows": max(1, max_results),
+            "sort[]": "downloads desc",
+            "output": "json",
+        },
+    )
+    return [r.id for r in parse_ia_search(payload, max_results)]
 
 
 async def download_internet_archive(
@@ -163,46 +144,27 @@ async def download_internet_archive(
     identifier: str,
     settings,
 ) -> tuple[bytes, str]:
-    """Descarga el mejor archivo disponible (epub > pdf) para un identificador."""
-    meta_url = f"{_METADATA_URL}/{quote(identifier)}"
-    timeout_meta = aiohttp.ClientTimeout(total=20, connect=8)
-
-    try:
-        async with session.get(meta_url, timeout=timeout_meta) as resp:
-            resp.raise_for_status()
-            meta = await resp.json(content_type=None)
-    except Exception as e:
-        logger.warning("internet archive metadata error: %s", e)
-        raise BooksApiError("No se pudieron obtener los metadatos de Internet Archive.") from e
-
-    if not isinstance(meta, dict):
-        raise BooksApiError("Internet Archive devolvió datos inválidos.")
-
-    files = meta.get("files")
-    if not isinstance(files, list):
+    """Descarga el mejor archivo disponible (epub > pdf), probando el siguiente si uno falla."""
+    meta = await fetch(session, f"{_METADATA_URL}/{quote(identifier)}", source=SOURCE)
+    if not isinstance(meta, dict) or not isinstance(meta.get("files"), list):
         raise BooksApiError("No se encontraron archivos para ese libro en Internet Archive.")
 
     limit = settings.max_file_size_bytes
-    candidates = _pick_candidates(files, limit)
+    candidates = pick_files(meta["files"], limit)
     if not candidates:
         raise BooksApiError("No se encontró un EPUB o PDF descargable en Internet Archive.")
 
     metadata = meta.get("metadata")
-    title = identifier
-    if isinstance(metadata, dict) and metadata.get("title"):
-        raw_title = metadata["title"]
-        title = str(raw_title[0] if isinstance(raw_title, list) else raw_title).strip()
-
+    title = _first(metadata.get("title")) if isinstance(metadata, dict) else ""
     last_error: BooksApiError | None = None
-    for filename_remote, ext in candidates:
-        download_url = f"{_DOWNLOAD_URL}/{quote(identifier)}/{quote(filename_remote)}"
+    for name, ext in candidates[:MAX_FILE_ATTEMPTS]:
+        url = f"{_DOWNLOAD_URL}/{quote(identifier)}/{quote(name)}"
         try:
-            data = await _fetch_file(session, download_url, limit)
+            got = await fetch_book(session, url, source=SOURCE, limit=limit)
         except BooksApiError as e:
-            logger.info("internet archive: %s falló (%s), probando siguiente", filename_remote, e)
+            logger.info("internet archive: %s falló (%s), probando siguiente", name, e)
             last_error = e
             continue
-        return data, f"{_safe_filename(title)}{ext}"
-
+        return got.data, f"{safe_filename(title or identifier)}{ext}"
     assert last_error is not None
     raise last_error

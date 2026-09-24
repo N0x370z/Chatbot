@@ -1,4 +1,4 @@
-"""Integración de Open Library para búsqueda y descarga de libros.
+"""Open Library: búsqueda en el catálogo y descarga vía Internet Archive.
 
 Open Library es un catálogo: no aloja archivos. Los libros de dominio público
 que muestra están digitalizados en Internet Archive, así que la búsqueda se
@@ -10,21 +10,36 @@ from __future__ import annotations
 
 import logging
 import re
-from urllib.parse import urlencode
+from typing import Any
 
 import aiohttp
 
-from bot.services.books_api import BookResult, BooksApiError
-from bot.services.http_utils import _retry_get
-from bot.services.internet_archive import download_internet_archive
+from bot.services.base import BookResult, BooksApiError, book_label
+from bot.services.http_utils import fetch
+from bot.services.internet_archive import download_internet_archive, public_identifiers
 
 logger = logging.getLogger(__name__)
-OPEN_LIBRARY_SEARCH_URL = "https://openlibrary.org/search.json"
-IA_SEARCH_URL = "https://archive.org/advancedsearch.php"
-_SEARCH_FIELDS = "key,title,author_name"
+
+SOURCE = "Open Library"
+SEARCH_URL = "https://openlibrary.org/search.json"
 _WORK_ID_RE = re.compile(r"OL\d+W")
-# Copias de IA que se prueban por obra antes de rendirse.
-_MAX_IA_CANDIDATES = 4
+# Copias de IA que se consultan y que se prueban por obra antes de rendirse.
+_MAX_IA_LOOKUP = 40
+_MAX_IA_CANDIDATES = 3
+
+
+def parse_search(payload: Any, max_results: int) -> list[BookResult]:
+    docs = payload.get("docs") if isinstance(payload, dict) else None
+    results: list[BookResult] = []
+    for doc in docs if isinstance(docs, list) else []:
+        if not isinstance(doc, dict) or not str(doc.get("key", "")).strip():
+            continue
+        authors = doc.get("author_name")
+        author = str(authors[0]) if isinstance(authors, list) and authors else ""
+        results.append(BookResult(id=str(doc["key"]).strip(), title=book_label(str(doc.get("title", "")), author)))
+        if len(results) >= max(1, max_results):
+            break
+    return results
 
 
 async def search_open_library(
@@ -32,89 +47,17 @@ async def search_open_library(
     query: str,
     max_results: int,
 ) -> list[BookResult]:
-    params = {
-        "q": f"{query} ebook_access:public",
-        "fields": _SEARCH_FIELDS,
-        "limit": max(1, max_results),
-    }
-    url = f"{OPEN_LIBRARY_SEARCH_URL}?{urlencode(params)}"
-
-    # Timeout propio más generoso que el global
-    timeout = aiohttp.ClientTimeout(total=30, connect=10)
-
-    try:
-        resp = await _retry_get(session, url, timeout=timeout)
-        resp.raise_for_status()
-        payload = await resp.json(content_type=None)
-    except TimeoutError as e:
-        logger.warning("open library timeout: %s", e)
-        raise BooksApiError(
-            "Open Library tardó demasiado. Prueba con /fuente internet_archive"
-        ) from e
-    except aiohttp.ClientError as e:
-        logger.warning("open library client error: %s", e)
-        raise BooksApiError(
-            "No se pudo contactar Open Library. Prueba con /fuente internet_archive"
-        ) from e
-    except ValueError as e:
-        logger.warning("open library invalid json: %s", e)
-        raise BooksApiError("Open Library devolvió JSON inválido.") from e
-
-    docs = payload.get("docs") if isinstance(payload, dict) else None
-    if not isinstance(docs, list):
-        return []
-
-    results: list[BookResult] = []
-    for doc in docs:
-        if not isinstance(doc, dict):
-            continue
-        key = str(doc.get("key", "")).strip()
-        if not key:
-            continue
-        title = str(doc.get("title", "")).strip() or "Sin título"
-        authors = doc.get("author_name")
-        author = ""
-        if isinstance(authors, list) and authors:
-            author = str(authors[0]).strip()
-        label = f"{title} - {author}" if author else title
-        results.append(BookResult(id=key, title=label[:500]))
-        if len(results) >= max(1, max_results):
-            break
-
-    return results
-
-
-async def _public_ia_identifiers(
-    session: aiohttp.ClientSession,
-    work_id: str,
-) -> list[str]:
-    """Identificadores de IA de acceso libre para una obra, más descargados primero."""
-    params = {
-        "q": f"openlibrary_work:{work_id} AND mediatype:texts AND NOT access-restricted-item:true",
-        "fl[]": "identifier",
-        "rows": _MAX_IA_CANDIDATES,
-        "sort[]": "downloads desc",
-        "output": "json",
-    }
-    url = f"{IA_SEARCH_URL}?{urlencode(params)}"
-    timeout = aiohttp.ClientTimeout(total=20, connect=8)
-    try:
-        async with session.get(url, timeout=timeout) as resp:
-            resp.raise_for_status()
-            payload = await resp.json(content_type=None)
-    except (TimeoutError, aiohttp.ClientError, ValueError) as e:
-        logger.warning("open library → IA lookup error: %s", e)
-        raise BooksApiError("No se pudo localizar el archivo en Internet Archive.") from e
-
-    try:
-        docs = payload["response"]["docs"]
-    except (KeyError, TypeError):
-        return []
-    return [
-        str(d["identifier"]).strip()
-        for d in docs
-        if isinstance(d, dict) and str(d.get("identifier", "")).strip()
-    ]
+    payload = await fetch(
+        session,
+        SEARCH_URL,
+        source=SOURCE,
+        params={
+            "q": f"{query} ebook_access:public",
+            "fields": "key,title,author_name",
+            "limit": max(1, max_results),
+        },
+    )
+    return parse_search(payload, max_results)
 
 
 async def download_open_library(
@@ -122,16 +65,25 @@ async def download_open_library(
     book_id: str,
     settings,
 ) -> tuple[bytes, str]:
-    """Descarga una obra de Open Library a través de su copia pública en IA."""
+    """Descarga una obra probando sus copias públicas en IA (más descargadas primero)."""
     match = _WORK_ID_RE.search(book_id)
     if not match:
         raise BooksApiError("ID de Open Library inválido.")
+    work_id = match.group(0)
 
-    identifiers = await _public_ia_identifiers(session, match.group(0))
+    # Open Library lista todas las copias de la obra en IA (libres y de
+    # préstamo); IA filtra las de acceso libre.
+    payload = await fetch(
+        session, SEARCH_URL, source=SOURCE, params={"q": f"key:/works/{work_id}", "fields": "ia"}
+    )
+    docs = payload.get("docs") if isinstance(payload, dict) else None
+    ia_ids = docs[0].get("ia") if isinstance(docs, list) and docs and isinstance(docs[0], dict) else None
+    ia_ids = [str(i) for i in ia_ids[:_MAX_IA_LOOKUP]] if isinstance(ia_ids, list) else []
+    identifiers = await public_identifiers(session, ia_ids, _MAX_IA_CANDIDATES)
     if not identifiers:
         raise BooksApiError(
             "Esta obra no tiene una copia de descarga libre. "
-            f"Referencia: https://openlibrary.org/works/{match.group(0)}"
+            f"Referencia: https://openlibrary.org/works/{work_id}"
         )
 
     last_error: BooksApiError | None = None
@@ -141,6 +93,5 @@ async def download_open_library(
         except BooksApiError as e:
             logger.info("open library: copia IA %s no sirvió (%s)", identifier, e)
             last_error = e
-
     assert last_error is not None
     raise last_error

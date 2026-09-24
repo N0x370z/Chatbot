@@ -10,9 +10,9 @@ WELCOME_HTML = (
 HELP_HTML = (
     "<b>📚 Libros</b>\n"
     "• /libro &lt;título o autor&gt; — buscar y descargar\n"
-    "• /fuente — elegir fuente de libros:\n"
-    "  <code>standard_ebooks</code> · <code>gutenberg</code> · <code>libgen</code>\n"
-    "  <code>open_library</code> · <code>internet_archive</code> · <code>dbooks</code>\n"
+    "• /fuente — elegir fuente de libros con botones\n"
+    "  (o <code>/fuente open_library</code>, <code>internet_archive</code>, <code>dbooks</code>,\n"
+    "  <code>libgen</code>, <code>gutenberg</code>, <code>standard_ebooks</code>)\n"
     "• /convertir &lt;formato&gt; — convertir archivo subido (epub/pdf/mobi/azw3/txt)\n\n"
     "<b>🎵 Audio</b>\n"
     "• /audio &lt;url&gt; — descargar audio (YouTube, SoundCloud, Bandcamp…)\n"
@@ -38,14 +38,11 @@ MENU_HINTS_HTML = {
     "books": (
         "<b>📚 Buscar libro</b>\n\n"
         "Comando: <code>/libro &lt;título o autor&gt;</code>\n\n"
-        "Fuentes disponibles (usa /fuente para cambiar):\n"
-        "• <code>standard_ebooks</code> — ediciones cuidadas de clásicos\n"
-        "• <code>gutenberg</code> — mayor catálogo de dominio público\n"
-        "• <code>libgen</code> — amplia biblioteca técnica y general\n"
-        "• <code>internet_archive</code> — archivos digitalizados\n"
-        "• <code>dbooks</code> — libros técnicos gratuitos\n"
-        "• <code>open_library</code> — catálogo (sin descarga directa)\n\n"
-        "Ejemplo: <code>/libro clean code robert martin</code>"
+        "Toca un resultado para descargarlo. Si no aparece lo que buscas, "
+        "usa <b>🔁 Otra fuente</b> debajo de los resultados.\n\n"
+        "Por defecto se busca en <b>Open Library</b> (clásicos de dominio público). "
+        "Para libros técnicos prueba <b>dBooks</b> o <b>Libgen</b>.\n\n"
+        "Ejemplo: <code>/libro don quijote</code>"
     ),
     "audio": (
         "<b>🎵 Descargar audio</b>\n\n"

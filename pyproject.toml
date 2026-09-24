@@ -13,3 +13,8 @@ ignore = ["E501"]
 [tool.pyright]
 include = ["bot", "src", "tests", "main.py", "main_worker.py"]
 extraPaths = ["."]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: pruebas contra APIs reales (requieren red; make test-live)"]
+addopts = "-m 'not live'"

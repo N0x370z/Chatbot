@@ -1,8 +1,12 @@
-"""Integración de búsqueda de libros de Libgen."""
+"""Libgen (solo libgen.li; el resto de espejos se retiró por inestabilidad).
+
+Los resultados apuntan a ``ads.php`` (página intermedia) o ``get.php``
+(archivo directo). Solo se siguen enlaces de dominios permitidos para que un
+resultado manipulado no pueda hacer que el bot descargue de cualquier host.
+"""
 
 from __future__ import annotations
 
-import hashlib
 import html
 import logging
 import re
@@ -10,62 +14,63 @@ from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
-from bot.services._book_validation import validate_book_bytes
-from bot.services.books_api import BookResult, BooksApiError
+from bot.services.base import BookResult, BooksApiError, book_label, safe_filename
+from bot.services.http_utils import fetch, fetch_book
 
 logger = logging.getLogger(__name__)
+
+SOURCE = "Libgen"
 LIBGEN_HOSTS = ("https://libgen.li",)
-LIBGEN_SEARCH_PATH = "/search.php"
+_ALLOWED_DOMAINS = ("libgen.li",)
+_INTERMEDIATE_MARKERS = ("ads.php", "library.lol", "libgen.lol", "libgen.rocks")
+_PAGE_TIMEOUT = aiohttp.ClientTimeout(total=20, connect=8)
+_GET_LINK_RE = re.compile(r'href=["\']((?:https?://[^"\']*)?(?:get\.php|/get/)[^"\']*)["\']')
+_DOWNLOAD_ID_RE = re.compile(r'<a[^>]+id=["\']download["\'][^>]*href=["\']([^"\']+)["\']')
+_EDITION_LINK_RE = re.compile(r'<a[^>]*href=["\']edition\.php[^"\']*["\'][^>]*>(.*?)</a>', re.S | re.I)
+_BOOK_EXTENSIONS = {"epub", "pdf", "mobi"}
+# libgen.li sirve una página vacía de nginx a User-Agents que no son de navegador.
+_HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"}
 
-
-def _safe_filename(name: str) -> str:
-    base = re.sub(r"[^\w\-.]+", "_", name.strip())
-    base = base.strip("_")[:80]
-    return base or "libro"
+# Compatibilidad con los tests existentes.
+_safe_filename = safe_filename
 
 
 def _clean_text(html_text: str) -> str:
-    text = re.sub(r"<[^>]+>", "", html_text)
-    return html.unescape(text).strip()
+    # Los atributos title="" de los tooltips contienen <br>; se quitan antes.
+    without_attrs = re.sub(r'\s(?:title|data-[\w-]+)="[^"]*"', "", html_text)
+    text = re.sub(r"<[^>]+>", " ", without_attrs)
+    return re.sub(r"\s+", " ", html.unescape(text)).strip()
 
 
-def _choose_filename(url: str, metadata_title: str | None = None) -> str:
-    parsed = urlparse(url)
-    name = None
-    if metadata_title:
-        name = _safe_filename(metadata_title)
-    path_name = parsed.path.rsplit("/", 1)[-1]
-    if path_name:
-        path_name = path_name.split("?")[0]
-        if path_name:
-            root, ext = (path_name.rsplit(".", 1) + [""])[:2]
-            if ext:
-                return f"{_safe_filename(root)}.{ext}"
-    if name:
-        ext = parsed.path.rsplit(".", 1)[-1] or "bin"
-        return f"{name}.{ext}"
-    checksum = hashlib.md5(url.encode("utf-8")).hexdigest()[:16]
-    return f"libro_{checksum}.bin"
+def _is_allowed(url: str) -> bool:
+    netloc = urlparse(url).netloc
+    return any(netloc == d or netloc.endswith("." + d) for d in _ALLOWED_DOMAINS)
 
 
-def _detect_ext_by_magic(data: bytes) -> str | None:
-    if data[:4] == b"%PDF":
-        return "pdf"
-    if data[:4] == b"PK\x03\x04":
-        return "epub"
-    if data[:4] in (b"BOOK", b"\x00\x00\x00 "):
-        return "mobi"
-    return None
-
-
-def _ext_from_content_type(ctype: str) -> str | None:
-    mapping = {
-        "application/pdf": "pdf",
-        "application/epub+zip": "epub",
-        "application/x-mobipocket-ebook": "mobi",
-        "application/octet-stream": None,
-    }
-    return mapping.get(ctype)
+def _parse_libgen_search_html(html_payload: str, host: str, max_results: int) -> list[BookResult]:
+    results: list[BookResult] = []
+    for row in re.findall(r"<tr[^>]*>(.*?)</tr>", html_payload, flags=re.S | re.I):
+        if "<th" in row.lower():
+            continue
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, flags=re.S | re.I)
+        if len(cells) < 9:
+            continue
+        # libgen.li: título, autor, editorial, año, idioma, páginas, tamaño,
+        # extensión y espejos (el primero es el propio libgen.li).
+        edition = _EDITION_LINK_RE.search(cells[0])
+        title = _clean_text(edition.group(1) if edition else cells[0])
+        links = re.findall(r'href=["\']([^"\']+)["\']', cells[8])
+        ext = _clean_text(cells[7]).lower() if len(cells) > 7 else ""
+        if not title or not links or (ext and ext not in _BOOK_EXTENSIONS):
+            continue
+        details = " · ".join(filter(None, (ext, _clean_text(cells[6]))))
+        label = book_label(title, _clean_text(cells[1]))
+        if details:
+            label = f"{label} ({details})"[:500]
+        results.append(BookResult(id=urljoin(host, links[0]), title=label))
+        if len(results) >= max(1, max_results):
+            break
+    return results
 
 
 async def search_libgen(
@@ -76,77 +81,34 @@ async def search_libgen(
 ) -> list[BookResult]:
     params = {
         "req": query,
-        "column": "title",
-        "view": "simple",
-        "phrase": "1",
-        "res": str(max(1, max_results)),
+        "columns[]": ["t", "a"],  # título y autor
+        "objects[]": "f",  # archivos
+        "topics[]": ["l", "f"],  # no ficción y ficción
+        "res": 25 if max_results <= 25 else 50,
     }
-
-    timeout = aiohttp.ClientTimeout(total=20, connect=8)
     for host in LIBGEN_HOSTS:
-        path = "/index.php" if "libgen.li" in host else LIBGEN_SEARCH_PATH
         try:
-            async with session.get(
-                f"{host}{path}",
-                params=params,
-                timeout=timeout,
-            ) as resp:
-                resp.raise_for_status()
-                payload = await resp.text()
-        except TimeoutError:
-            logger.warning(
-                "libgen.li no respondió (timeout) — la fuente está temporalmente no disponible"
+            page = await fetch(
+                session, f"{host}/index.php", source=SOURCE, parse="text",
+                params=params, headers=_HEADERS,
             )
+        except BooksApiError as e:
+            logger.warning("%s no disponible: %s", host, e)
             continue
-        except aiohttp.ClientError as e:
-            logger.warning(
-                "libgen.li no está disponible: %s — la fuente está temporalmente no disponible", e
-            )
-            continue
-
-        results = _parse_libgen_search_html(payload, host, max_results)
+        results = _parse_libgen_search_html(page, host, max_results)
         if results:
             return results
-
     return []
 
 
-def _parse_libgen_search_html(html_payload: str, host: str, max_results: int) -> list[BookResult]:
-    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html_payload, flags=re.S | re.I)
-    results: list[BookResult] = []
-    for row in rows:
-        if "<th" in row.lower():
-            continue
-        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, flags=re.S | re.I)
-        if len(cells) < 9:
-            continue
-
-        if "libgen.li" in host:
-            title_html = cells[0]
-            author_html = cells[1]
-            mirrors_html = cells[8]
-        else:
-            if len(cells) < 10:
-                continue
-            title_html = cells[2]
-            author_html = cells[1]
-            mirrors_html = cells[9]
-
-        title = _clean_text(title_html)
-        if not title:
-            continue
-        author = _clean_text(author_html)
-        download_links = re.findall(r'href=["\']([^"\']+)["\']', mirrors_html)
-        if not download_links:
-            continue
-        download_url = download_links[0]
-        if download_url.startswith("/") or not download_url.startswith(("http://", "https://")):
-            download_url = urljoin(host, download_url)
-        label = f"{title} - {author}" if author else title
-        results.append(BookResult(id=download_url, title=label[:500]))
-        if len(results) >= max(1, max_results):
-            break
-    return results
+async def _resolve_intermediate(session: aiohttp.ClientSession, page_url: str) -> str:
+    page = await fetch(
+        session, page_url, source=SOURCE, parse="text", headers=_HEADERS, timeout=_PAGE_TIMEOUT
+    )
+    match = _GET_LINK_RE.search(page) or _DOWNLOAD_ID_RE.search(page)
+    if not match:
+        raise BooksApiError("No se encontró el link de descarga en la página de Libgen.")
+    return urljoin(page_url, match.group(1))
 
 
 async def download_libgen(
@@ -157,102 +119,18 @@ async def download_libgen(
     if not book_id.startswith(("http://", "https://")):
         raise BooksApiError("ID de Libgen inválido.")
 
-    limit = settings.max_file_size_bytes
-    timeout_page = aiohttp.ClientTimeout(total=20, connect=8)
-    timeout_file = aiohttp.ClientTimeout(total=120, connect=10)
-
-    # Paso 1: detectar si es página intermedia o archivo directo
-    # Es página intermedia si el dominio es library.lol o similar
-    # y la ruta contiene /main/ o /fiction/ o ads.php
-    is_intermediate = any(
-        domain in book_id
-        for domain in ("library.lol", "libgen.lol", "libgen.rocks", "ads.php")
-    )
-
     download_url = book_id
+    if any(marker in book_id for marker in _INTERMEDIATE_MARKERS):
+        if not _is_allowed(book_id):
+            raise BooksApiError(f"Dominio intermediario no permitido: {urlparse(book_id).netloc}")
+        download_url = await _resolve_intermediate(session, book_id)
 
-    if is_intermediate:
-        _intermediate_allowed = ["library.lol", "libgen.lol", "libgen.rocks", "libgen.li"]
-        parsed_intermediate = urlparse(book_id)
-        if not any(
-            parsed_intermediate.netloc == d or parsed_intermediate.netloc.endswith("." + d)
-            for d in _intermediate_allowed
-        ):
-            raise BooksApiError(f"Dominio intermediario no permitido: {parsed_intermediate.netloc}")
-
-        # Paso 2: hacer GET a la página intermedia y extraer link real
-        try:
-            connector = aiohttp.TCPConnector(ssl=settings.ssl_verify) if "libgen.li" in book_id else None
-            async with aiohttp.ClientSession(connector=connector) as tmp_session, tmp_session.get(book_id, timeout=timeout_page) as resp:
-                resp.raise_for_status()
-                html_text = await resp.text(errors="replace")
-        except aiohttp.ClientError as e:
-            raise BooksApiError("No se pudo acceder a la página de descarga.") from e
-
-        # Extraer href que contiene el archivo real
-        # Buscar <a href="https://...get.php..."> o <a href="get.php..."> o <a id="download" href="...">
-        match = re.search(
-            r'href=["\']('
-            r'(?:https?://[^"\']*)?(?:get\.php|/get/)[^"\']*'
-            r')["\']',
-            html_text,
+    if not _is_allowed(download_url):
+        raise BooksApiError(
+            f"El dominio de descarga no está permitido: {urlparse(download_url).netloc}"
         )
-        if not match:
-            # Segundo intento: buscar cualquier link de descarga directa
-            match = re.search(
-                r'<a[^>]+id=["\']download["\'][^>]*href=["\']([^"\']+)["\']',
-                html_text,
-            )
-        if not match:
-            raise BooksApiError(
-                "No se encontró el link de descarga en la página de Libgen."
-            )
-        download_url = match.group(1)
-        if download_url.startswith("get.php") or download_url.startswith("/get.php"):
-            parsed = urlparse(book_id)
-            download_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", download_url)
 
-    # Paso 3: descargar el archivo real
-    allowed_domains = ["libgen.li"]
-    parsed_download_url = urlparse(download_url)
-
-    if not any(
-        parsed_download_url.netloc == d or parsed_download_url.netloc.endswith("." + d)
-        for d in allowed_domains
-    ):
-        raise BooksApiError(f"El dominio de descarga no está permitido: {parsed_download_url.netloc}")
-
-    try:
-        connector = aiohttp.TCPConnector(ssl=settings.ssl_verify)
-        async with aiohttp.ClientSession(connector=connector) as tmp_session, tmp_session.get(download_url, timeout=timeout_file) as resp:
-            resp.raise_for_status()
-            content_length = resp.content_length
-            if content_length is not None and content_length > limit:
-                raise BooksApiError(
-                    f"El archivo (~{content_length // (1024*1024)} MB) supera el límite."
-                )
-            data = await resp.read()
-            cd = resp.headers.get("Content-Disposition", "")
-            ctype = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
-    except aiohttp.ClientError as e:
-        logger.error("Download failed from %s: %s", download_url, e)
-        raise BooksApiError("No se pudo descargar el libro desde Libgen.") from e
-
-    if len(data) > limit:
-        raise BooksApiError("El archivo descargado supera MAX_FILE_SIZE_MB.")
-
-    validate_book_bytes(data)
-
-    # Detectar extensión real por magic bytes
-    ext = _detect_ext_by_magic(data) or _ext_from_content_type(ctype) or "bin"
-
-    # Nombre desde Content-Disposition o fallback
-    filename = None
-    if "filename=" in cd:
-        part = cd.split("filename=", 1)[1].strip().strip('"').split(";")[0].strip()
-        if part:
-            filename = part
-    if not filename:
-        filename = f"{_safe_filename(book_id)}.{ext}"
-
-    return data, filename
+    got = await fetch_book(
+        session, download_url, source=SOURCE, limit=settings.max_file_size_bytes, headers=_HEADERS
+    )
+    return got.data, got.filename or f"libgen_{safe_filename(urlparse(download_url).query)[:40]}.{got.kind}"
