@@ -31,6 +31,8 @@ class BookSource:
     description: str
     search: SearchFn
     download: DownloadFn
+    # Consulta con resultados conocidos, usada por /diagnostico y los tests live.
+    probe_query: str
 
 
 def _no_settings(fn):
@@ -43,27 +45,27 @@ def _no_settings(fn):
 _ALL = (
     BookSource(
         "open_library", "Open Library", "clásicos de dominio público (vía Internet Archive)",
-        _no_settings(search_open_library), download_open_library,
+        _no_settings(search_open_library), download_open_library, "don quijote",
     ),
     BookSource(
         "internet_archive", "Internet Archive", "biblioteca digital con millones de textos",
-        _no_settings(search_internet_archive), download_internet_archive,
+        _no_settings(search_internet_archive), download_internet_archive, "don quijote",
     ),
     BookSource(
         "dbooks", "dBooks", "libros técnicos y de programación gratuitos",
-        _no_settings(search_dbooks), download_dbooks,
+        _no_settings(search_dbooks), download_dbooks, "python",
     ),
     BookSource(
         "libgen", "Libgen", "catálogo amplio de libros técnicos y académicos",
-        search_libgen, download_libgen,
+        search_libgen, download_libgen, "python crash course",
     ),
     BookSource(
         "gutenberg", "Gutenberg", "Project Gutenberg (su API cae con frecuencia)",
-        _no_settings(search_gutenberg), download_gutenberg,
+        _no_settings(search_gutenberg), download_gutenberg, "frankenstein",
     ),
     BookSource(
         "standard_ebooks", "Standard Ebooks", "EPUB cuidados (requiere cuenta de pago)",
-        _no_settings(search_standard_ebooks), download_standard_ebooks,
+        _no_settings(search_standard_ebooks), download_standard_ebooks, "austen",
     ),
 )
 

@@ -20,15 +20,17 @@ from tests.conftest import make_settings
 
 pytestmark = pytest.mark.live
 
+# Fuentes que fallan por motivos externos: su fallo no pone el CI en rojo.
+KNOWN_BROKEN = {
+    "gutenberg": "gutendex.com cae con frecuencia",
+    "standard_ebooks": "OPDS requiere Patrons Circle (401)",
+}
 CASES = [
-    pytest.param("open_library", "don quijote", id="open_library"),
-    pytest.param("internet_archive", "don quijote", id="internet_archive"),
-    pytest.param("dbooks", "python", id="dbooks"),
-    pytest.param("libgen", "python crash course", id="libgen"),
-    pytest.param("gutenberg", "frankenstein", id="gutenberg",
-                 marks=pytest.mark.xfail(reason="gutendex.com cae con frecuencia", strict=False)),
-    pytest.param("standard_ebooks", "austen", id="standard_ebooks",
-                 marks=pytest.mark.xfail(reason="OPDS requiere Patrons Circle (401)", strict=False)),
+    pytest.param(
+        key, id=key,
+        marks=[pytest.mark.xfail(reason=KNOWN_BROKEN[key], strict=False)] if key in KNOWN_BROKEN else [],
+    )
+    for key in SOURCES
 ]
 
 
@@ -40,8 +42,9 @@ def _ssl_context() -> ssl.SSLContext:
         return ssl.create_default_context()
 
 
-async def _search_and_download(source_key: str, query: str):
+async def _search_and_download(source_key: str):
     source = SOURCES[source_key]
+    query = source.probe_query
     settings = make_settings(max_file_size_mb=50)
     connector = aiohttp.TCPConnector(ssl=_ssl_context())
     async with aiohttp.ClientSession(connector=connector, headers={"User-Agent": "TelegramMediaBot/1.0"}) as session:
@@ -56,8 +59,8 @@ async def _search_and_download(source_key: str, query: str):
         pytest.fail(f"{source.label}: ningún resultado descargable:\n" + "\n".join(errors))
 
 
-@pytest.mark.parametrize(("source_key", "query"), CASES)
-def test_source_search_and_download(source_key, query):
-    data, filename = asyncio.run(asyncio.wait_for(_search_and_download(source_key, query), timeout=600))
+@pytest.mark.parametrize("source_key", CASES)
+def test_source_search_and_download(source_key):
+    data, filename = asyncio.run(asyncio.wait_for(_search_and_download(source_key), timeout=600))
     assert len(data) > 1000
     assert filename.rsplit(".", 1)[-1] in {"epub", "pdf", "mobi"}

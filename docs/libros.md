@@ -34,6 +34,12 @@ Si `BOOKS_API_BASE_URL` está configurada, la fuente por defecto pasa a ser esa 
 - **Libgen** sirve una página vacía de nginx a User-Agents que no son de navegador, así que sus peticiones usan uno de Firefox. Los parámetros de búsqueda actuales son `columns[]`, `objects[]` y `topics[]`.
 - Solo se aceptan PDF, EPUB y MOBI. Se validan por *magic bytes*, no por la extensión ni el `Content-Type`.
 
+## Subidas y `/convertir`
+
+- El usuario envía un PDF/EPUB: se descarga como `.<nombre>.part`, se validan los *magic bytes* y se renombra atómicamente dentro de `INCOMING_FILES_PATH`. El worker ignora los `.part`, así que nunca mueve un archivo a medio escribir.
+- La Bot API solo permite a los bots descargar archivos de hasta **20 MB**. Por eso el límite efectivo de subida es `min(MAX_UPLOAD_SIZE_MB, 20)`.
+- El worker mueve cada archivo a `processed` en cuanto llega. Por eso `/convertir` guarda el `file_id` de Telegram, copia (o vuelve a descargar) el archivo a una carpeta temporal privada dentro de `DOWNLOAD_PATH`, convierte ahí y la borra al terminar.
+
 ## Cómo se piden los recursos
 
 Todas las fuentes usan `bot/services/http_utils.py`:
@@ -49,11 +55,11 @@ La sesión HTTP es compartida (`bot_data["http_session"]`) y solo lleva el User-
    - una función pura `parse_search(payload, max_results) -> list[BookResult]`,
    - `async def search_x(session, query, max_results)` que llama a `fetch` y a `parse_search`,
    - `async def download_x(session, book_id, settings) -> tuple[bytes, str]` que usa `fetch_book`.
-2. Regístrala en `_ALL` de `bot/services/sources.py` (clave, nombre, descripción, funciones). La posición define su prioridad de respaldo. El selector de `/fuente`, el respaldo y la descarga salen del registro, así que no hay que tocar el handler.
+2. Regístrala en `_ALL` de `bot/services/sources.py`: clave, nombre, descripción, funciones y una `probe_query` con resultados conocidos. Esta consulta la usan `/diagnostico` y los tests live. La posición define su prioridad de respaldo. El selector de `/fuente`, el respaldo y la descarga salen del registro, así que no hay que tocar el handler.
 3. Añade tests:
    - el parser en `tests/test_book_sources.py::test_parse_search` (una fila del `parametrize`),
    - la descarga en `test_source_download_happy_path`,
-   - un caso en `tests/test_live_sources.py`.
+   - los tests live la incluyen automáticamente (usan el registro).
 
 ## Pruebas
 
@@ -68,6 +74,8 @@ La sesión HTTP es compartida (`bot_data["http_session"]`) y solo lleva el User-
 - Los errores de red/HTTP se prueban **una sola vez**, en `tests/test_http_utils.py`. Los tests de cada fuente solo cubren lo específico: interpretación de la respuesta y selección de archivo.
 - Los tests `live` de Gutenberg y Standard Ebooks están marcados `xfail`, porque esas APIs fallan por motivos externos. Si vuelven a funcionar, aparecen como `XPASS`.
 - Si el workflow semanal falla, revisa el log: indica qué fuente dejó de buscar o descargar.
+- En producción, `/diagnostico` (solo admin) hace lo mismo desde el bot: una búsqueda real por fuente con su `probe_query`.
+- `pytest` trata como error cualquier «coroutine … was never awaited» (`pyproject.toml`).
 
 ### Problemas frecuentes
 

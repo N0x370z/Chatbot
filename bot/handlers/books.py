@@ -15,7 +15,9 @@ import contextlib
 import html
 import io
 import logging
+import shutil
 from pathlib import Path
+from uuid import uuid4
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message, Update
 from telegram.error import TelegramError
@@ -140,12 +142,38 @@ async def on_source_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
 
 
+CONVERT_FORMATS = ("epub", "pdf", "mobi", "azw3", "txt")
+
+
+async def _stage_last_upload(context: ContextTypes.DEFAULT_TYPE, work_dir: Path) -> Path | None:
+    """Copia el último archivo subido a ``work_dir`` para convertirlo allí.
+
+    El worker mueve los archivos de INCOMING_FILES_PATH a processed, así que
+    si ya no está se vuelve a descargar desde Telegram con su file_id.
+    """
+    last_file = context.user_data.get("last_uploaded_file")
+    if not last_file:
+        return None
+    source = Path(last_file)
+    staged = work_dir / source.name
+    if source.exists():
+        await asyncio.to_thread(shutil.copyfile, source, staged)
+        return staged
+    file_id = context.user_data.get("last_uploaded_file_id")
+    if not file_id:
+        return None
+    tg_file = await context.bot.get_file(file_id)
+    await tg_file.download_to_drive(custom_path=str(staged))
+    return staged
+
+
 async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     msg = update.effective_message
     if not msg or context.user_data is None:
         return
-    stats_from(context).mark_command("convertir", user.id if user else None)
+    stats = stats_from(context)
+    stats.mark_command("convertir", user.id if user else None)
     args = context.args or []
 
     if not args:
@@ -153,51 +181,38 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "<b>Conversión de libros</b>\n"
             "Primero envía un PDF o EPUB al bot.\n"
             "Luego usa: <code>/convertir &lt;formato&gt;</code>\n"
-            "Formatos: epub, pdf, mobi, azw3, txt\n\n"
+            f"Formatos: {', '.join(CONVERT_FORMATS)}\n\n"
             "Ejemplo: <code>/convertir epub</code>"
         )
         return
 
     output_format = args[0].strip().lower()
-    valid_formats = {"epub", "pdf", "mobi", "azw3", "txt"}
-    if output_format not in valid_formats:
-        await msg.reply_text(
-            f"Formato no válido. Usa uno de: {', '.join(sorted(valid_formats))}"
-        )
+    if output_format not in CONVERT_FORMATS:
+        await msg.reply_text(f"Formato no válido. Usa uno de: {', '.join(CONVERT_FORMATS)}")
         return
 
     last_file = context.user_data.get("last_uploaded_file")
     if not last_file:
-        await msg.reply_text(
-            "No hay archivo reciente. Envía un PDF o EPUB primero."
-        )
+        await msg.reply_text("No hay archivo reciente. Envía un PDF o EPUB primero.")
+        return
+    if Path(last_file).suffix.lower() == f".{output_format}":
+        await msg.reply_text(f"El archivo ya está en formato {output_format.upper()}.")
         return
 
-    last_path = Path(last_file)
-    if not last_path.exists():
-        await msg.reply_text(
-            "El archivo ya no está disponible. Envíalo de nuevo."
-        )
-        context.user_data.pop("last_uploaded_file", None)
-        return
+    from bot.utils.converter import ConversionError, convert_book
 
-    await msg.reply_text(f"Convirtiendo a {output_format.upper()}...")
-
+    status_msg = await msg.reply_text(
+        f"⏳ Convirtiendo a {output_format.upper()}, esto puede tardar unos segundos..."
+    )
+    # Directorio privado: nada de lo que se escribe aquí lo toca el worker.
+    work_dir = settings_from(context).download_path / f"convert_{uuid4().hex}"
+    work_dir.mkdir(parents=True)
     try:
-        from bot.utils.converter import ConversionError, convert_book
-
-        if last_path.suffix.lower() == f".{output_format}":
-            await msg.reply_text(
-                f"El archivo ya está en formato {output_format.upper()}. "
-                "No es necesario convertirlo."
-            )
+        staged = await _stage_last_upload(context, work_dir)
+        if staged is None:
+            await msg.reply_text("El archivo ya no está disponible. Envíalo de nuevo.")
             return
-
-        status_msg = await msg.reply_text(
-            f"⏳ Convirtiendo a {output_format.upper()}, esto puede tardar unos segundos..."
-        )
-        output_path = await convert_book(last_path, output_format)
-
+        output_path = await convert_book(staged, output_format)
         with output_path.open("rb") as f:
             await msg.reply_document(
                 document=InputFile(f, filename=output_path.name),
@@ -205,18 +220,18 @@ async def cmd_convertir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 write_timeout=600,
                 connect_timeout=60,
             )
-        await status_msg.delete()
-        stats_from(context).mark_download(ok=True)
-        with contextlib.suppress(OSError):
-            output_path.unlink(missing_ok=True)
-    except Exception as exc:
-        from bot.utils.converter import ConversionError
-        stats_from(context).mark_download(ok=False)
-        if isinstance(exc, ConversionError):
-            await msg.reply_text(f"Error de conversión: {exc}")
-        else:
-            logger.exception("convertir: error inesperado")
-            await msg.reply_text("Error al enviar el archivo convertido.")
+        stats.mark_download(ok=True)
+    except ConversionError as exc:
+        stats.mark_download(ok=False)
+        await msg.reply_text(f"Error de conversión: {exc}")
+    except (OSError, TelegramError):
+        stats.mark_download(ok=False)
+        logger.exception("convertir: error al preparar o enviar el archivo")
+        await msg.reply_text("Error al enviar el archivo convertido.")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        with contextlib.suppress(TelegramError):
+            await status_msg.delete()
 
 
 # ── Búsqueda ─────────────────────────────────────────────────────────────────

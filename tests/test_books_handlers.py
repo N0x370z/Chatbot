@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -67,7 +68,7 @@ def fake_sources(monkeypatch):
             if isinstance(result, Exception):
                 raise result
             return result
-        return BookSource(key, SOURCES[key].label, "", search, downloads)
+        return BookSource(key, SOURCES[key].label, "", search, downloads, "q")
 
     monkeypatch.setattr(books, "SOURCES", {key: make(key) for key in SOURCES})
     return found, downloads
@@ -155,3 +156,45 @@ def test_pick_error_is_reported(fake_sources):
 
     update.callback_query.message.reply_document.assert_not_awaited()
     assert "No disponible." in update.callback_query.message.reply_text.call_args[0][0]
+
+
+def _convert_context(tmp_path, user_data):
+    ctx = _context(args=["epub"], user_data=user_data)
+    ctx.application.bot_data["settings"] = make_settings(download_path=tmp_path)
+    return ctx
+
+
+def _fake_convert(monkeypatch, seen: list):
+    async def convert(path, fmt):
+        seen.append(path)
+        out = path.with_suffix(f".{fmt}")
+        out.write_bytes(b"PK\x03\x04converted")
+        return out
+    monkeypatch.setattr("bot.utils.converter.convert_book", convert)
+
+
+def test_convertir_redownloads_when_worker_moved_the_file(tmp_path, monkeypatch):
+    """El worker ya movió el archivo a processed: se descarga de nuevo por file_id."""
+    seen: list = []
+    _fake_convert(monkeypatch, seen)
+    tg_file = MagicMock()
+    tg_file.download_to_drive = AsyncMock(side_effect=lambda custom_path: Path(custom_path).write_bytes(b"%PDF"))
+    update = _command_update()
+    ctx = _convert_context(tmp_path, {
+        "last_uploaded_file": str(tmp_path / "incoming" / "libro.pdf"),  # ya no existe
+        "last_uploaded_file_id": "FILE123",
+    })
+    ctx.bot.get_file = AsyncMock(return_value=tg_file)
+
+    asyncio.run(books.cmd_convertir(update, ctx))
+
+    ctx.bot.get_file.assert_awaited_once_with("FILE123")
+    update.effective_message.reply_document.assert_awaited_once()
+    assert seen[0].parent.name.startswith("convert_")  # carpeta privada, no incoming
+    assert not seen[0].parent.exists()  # y se limpia al terminar
+
+
+def test_convertir_without_upload():
+    update, ctx = _command_update(), _context(args=["epub"])
+    asyncio.run(books.cmd_convertir(update, ctx))
+    assert "Envía un PDF o EPUB" in update.effective_message.reply_text.call_args[0][0]

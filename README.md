@@ -172,7 +172,7 @@ WORKER_POLL_INTERVAL_SEC=1.0
 | `WORKER_POLL_INTERVAL_SEC` | Intervalo del loop principal del worker | `1.0` |
 | `LOG_LEVEL` | Nivel de logging (`INFO`, `DEBUG`) | `INFO` |
 | `ALLOWED_USER_IDS` | IDs autorizados, separados por coma (vacío = todos) | vacío |
-| `MAX_UPLOAD_SIZE_MB` | Tamaño máximo de archivos que envían los usuarios | `50` |
+| `MAX_UPLOAD_SIZE_MB` | Tamaño máximo de archivos que envían los usuarios (Telegram limita a los bots a 20 MB) | `50` |
 | `RATE_LIMIT_WINDOW_SEC` / `RATE_LIMIT_MAX_REQUESTS` | Límite de peticiones por usuario | `60` / `10` |
 | `SSL_VERIFY` | Verificar certificados HTTPS salientes | `true` |
 | `BOOKS_API_BASE_URL` | API de libros propia; si se define, pasa a ser la fuente por defecto | vacío |
@@ -262,7 +262,7 @@ Y toma variables desde `.env`.
 | `/start` | Inicia el bot y muestra el menú principal |
 | `/libro <título o autor>` | Busca libros; toca un resultado para descargarlo o «🔁 Otra fuente» |
 | `/fuente [clave]` | Selector de fuente con botones (`open_library`, `internet_archive`, `dbooks`, `libgen`, `gutenberg`, `standard_ebooks`) |
-| `/convertir <formato>` | Convertir libro a otro formato |
+| `/convertir <formato>` | Convierte el último PDF/EPUB que enviaste (epub, pdf, mobi, azw3, txt) |
 | `/audio <nombre o URL>` | Descarga y envía audio (MP3/M4A) |
 | `/formato_audio` | Elegir formato de audio (MP3/M4A/OPUS/FLAC) |
 | `/video <nombre o URL>` | Descarga y envía video (MP4) |
@@ -272,7 +272,8 @@ Y toma variables desde `.env`.
 | `/estado` | Ver tus preferencias (fuente, formato de audio) |
 | `/version` · `/ping` | Versión del bot · prueba de conexión |
 | `/ayuda` | Muestra la lista de comandos |
-| `/stats` · `/diagnostico` | (Solo admin) Estadísticas y diagnóstico |
+| `/stats` | (Solo admin) Estadísticas de uso |
+| `/diagnostico` | (Solo admin) Hace una búsqueda real en cada fuente de libros y muestra cuáles funcionan |
 | `/ban` · `/unban` · `/broadcast` | (Solo admin) Gestión de usuarios y avisos |
 
 ---

@@ -31,8 +31,6 @@ _BOOK_EXTENSIONS = {"epub", "pdf", "mobi"}
 # libgen.li sirve una página vacía de nginx a User-Agents que no son de navegador.
 _HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"}
 
-# Compatibilidad con los tests existentes.
-_safe_filename = safe_filename
 
 
 def _clean_text(html_text: str) -> str:

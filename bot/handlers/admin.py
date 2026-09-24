@@ -6,11 +6,17 @@ import asyncio
 import time
 from collections.abc import Iterable
 
-import aiohttp
 from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from bot.deps import db_from, http_session_from, settings_from, stats_from
+from bot.services.base import BooksApiError
+from bot.services.sources import SOURCES
+
+DIAG_TIMEOUT_SEC = 20
+# Pausa entre mensajes de /broadcast: Telegram limita a ~30 mensajes/s.
+BROADCAST_DELAY_SEC = 0.05
 
 
 def _top_commands(items: Iterable[tuple[str, int]], n: int = 5) -> str:
@@ -90,20 +96,13 @@ def register(application: Application, *, admin_user_id: int) -> None:
             try:
                 await context.bot.send_message(chat_id=uid, text=msg_text)
                 sent += 1
-            except Exception:
+            except TelegramError:  # usuario que bloqueó el bot, chat borrado…
                 pass
+            await asyncio.sleep(BROADCAST_DELAY_SEC)
         await update.effective_message.reply_text(f"Broadcast enviado a {sent} usuarios de {len(users)}.")
 
-    _DIAG_PROBES = [
-        ("Open Library",     "https://openlibrary.org/search.json?q=test&limit=1"),
-        ("Gutendex",         "https://gutendex.com/books?search=test"),
-        ("Standard Ebooks",  "https://standardebooks.org/feeds/opds/all"),
-        ("dBooks",           "https://www.dbooks.org/api/search/test"),
-        ("Internet Archive", "https://archive.org/advancedsearch.php?q=test&output=json&rows=1"),
-        ("Libgen",           "https://libgen.li/index.php?req=test&res=1"),
-    ]
-
     async def cmd_diagnostico(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Hace una búsqueda real en cada fuente, igual que /libro."""
         user = update.effective_user
         if not update.effective_message or admin_user_id == 0 or user is None or user.id != admin_user_id:
             if update.effective_message:
@@ -111,22 +110,25 @@ def register(application: Application, *, admin_user_id: int) -> None:
             return
 
         session = http_session_from(context)
-        timeout = aiohttp.ClientTimeout(total=10, connect=5)
+        settings = settings_from(context)
 
-        async def _probe(name: str, url: str) -> str:
+        async def _probe(source) -> str:
             start = time.monotonic()
             try:
-                async with session.get(url, timeout=timeout) as resp:
-                    resp.raise_for_status()
-                    ms = int((time.monotonic() - start) * 1000)
-                    return f"✅ {name} — {ms}ms"
+                async with asyncio.timeout(DIAG_TIMEOUT_SEC):
+                    results = await source.search(session, source.probe_query, 3, settings)
             except TimeoutError:
-                return f"❌ {name} — timeout"
-            except aiohttp.ClientError as exc:
-                return f"❌ {name} — {exc.__class__.__name__}"
+                return f"❌ {source.label} — timeout"
+            except BooksApiError as exc:
+                return f"❌ {source.label} — {exc}"
+            ms = int((time.monotonic() - start) * 1000)
+            if not results:
+                return f"⚠️ {source.label} — responde pero sin resultados ({ms} ms)"
+            return f"✅ {source.label} — {len(results)} resultados ({ms} ms)"
 
-        lines = await asyncio.gather(*(_probe(n, u) for n, u in _DIAG_PROBES))
-        await update.effective_message.reply_text("\n".join(lines))
+        status = await update.effective_message.reply_text("🔎 Probando fuentes de libros…")
+        lines = await asyncio.gather(*(_probe(src) for src in SOURCES.values()))
+        await status.edit_text("\n".join(["Fuentes de libros:", *lines]))
 
     application.add_handler(CommandHandler("stats", cmd_stats))
     application.add_handler(CommandHandler("ban", cmd_ban))

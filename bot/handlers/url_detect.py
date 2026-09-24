@@ -54,14 +54,18 @@ async def on_url_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if _is_audio_domain(url):
         fmt = context.user_data.get("audio_format", "mp3")
-        job = await queue_from(context).enqueue(
-            context.application,
-            kind="audio",
-            url=url,
-            chat_id=update.effective_chat.id,
-            user_id=user.id,
-            audio_format=fmt,
-        )
+        try:
+            job = await queue_from(context).enqueue(
+                context.application,
+                kind="audio",
+                url=url,
+                chat_id=update.effective_chat.id,
+                user_id=user.id,
+                audio_format=fmt,
+            )
+        except ValueError as e:
+            await msg.reply_text(str(e))
+            return
         await msg.reply_text(
             f"🎵 Audio detectado automáticamente.\n"
             f"Trabajo en cola: #{job.id} ({fmt.upper()}). Usa /jobs para ver estado."
@@ -96,14 +100,18 @@ async def on_url_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     chat_id = query.message.chat_id if query.message else update.effective_user.id
     fmt = context.user_data.get("audio_format", "mp3")
-    job = await queue_from(context).enqueue(
-        context.application,
-        kind=kind,
-        url=url,
-        chat_id=chat_id,
-        user_id=update.effective_user.id,
-        audio_format=fmt,
-    )
+    try:
+        job = await queue_from(context).enqueue(
+            context.application,
+            kind=kind,
+            url=url,
+            chat_id=chat_id,
+            user_id=update.effective_user.id,
+            audio_format=fmt,
+        )
+    except ValueError as e:
+        await query.edit_message_text(str(e))
+        return
     emoji = "🎵" if kind == "audio" else "🎬"
     await query.edit_message_text(
         f"{emoji} Trabajo en cola: #{job.id}. Usa /jobs para ver estado."
